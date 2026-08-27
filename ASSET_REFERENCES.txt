@@ -1,0 +1,15 @@
+# Manus Storage asset references
+# These paths are referenced by the application. The backup contains paths, not copied object bytes.
+
+/manus-storage/madrv-converter-v4_28935c58.mjs
+/manus-storage/madrv-converter-v4_f7f66741.wasm
+/manus-storage/madrv-mdx-player-v12_2d6b7625.wasm
+/manus-storage/madrv-mdx-player-v12_fde3ce0c.mjs
+/manus-storage/madrv-mdx-worklet-bundled_e8ea643e.js
+/manus-storage/madrv-midi-events-v3_a93766ec.wasm
+/manus-storage/madrv-midi-events-v3_d61f79e9.mjs
+/manus-storage/madrv-midi-events-v4_2facde2d.wasm
+/manus-storage/madrv-midi-events-v4_b2d6bf6b.mjs
+/manus-storage/signal-deck-demo-catalog_5f939bfb.json
+/manus-storage/signal-deck-diagnostic_d91a1673.mdr
+/manus-storage/spessasynth-processor.min_0ece0471.js

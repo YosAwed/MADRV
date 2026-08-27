@@ -1,0 +1,236 @@
+/* Signal Deck: warm studio ink, measurement rails and Signal Lime are the unifying visual language. */
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+:root {
+  --radius: 0.2rem;
+  --background: #11120f;
+  --foreground: #f5f4ec;
+  --card: #191b16;
+  --card-foreground: #f5f4ec;
+  --popover: #1d1f19;
+  --popover-foreground: #f5f4ec;
+  --primary: #d8ff3e;
+  --primary-foreground: #11120f;
+  --secondary: #2a2c25;
+  --secondary-foreground: #f5f4ec;
+  --muted: #242620;
+  --muted-foreground: #a9aca2;
+  --accent: #30332a;
+  --accent-foreground: #f5f4ec;
+  --destructive: #ff746c;
+  --destructive-foreground: #11120f;
+  --border: rgba(245, 244, 236, 0.14);
+  --input: rgba(245, 244, 236, 0.18);
+  --ring: #d8ff3e;
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--background); }
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  color: var(--foreground);
+  background:
+    radial-gradient(circle at 84% -10%, rgba(216, 255, 62, 0.1), transparent 30rem),
+    radial-gradient(circle at -10% 65%, rgba(104, 119, 89, 0.11), transparent 34rem),
+    var(--background);
+  font-family: "IBM Plex Sans JP", sans-serif;
+}
+
+button, input, textarea { font: inherit; }
+button:not(:disabled), [role="button"]:not([aria-disabled="true"]), input, textarea { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+::selection { background: var(--primary); color: var(--primary-foreground); }
+
+.mono { font-family: "IBM Plex Mono", monospace; }
+.display { font-family: "Space Grotesk", "IBM Plex Sans JP", sans-serif; }
+
+.noise-overlay {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.45'/%3E%3C/svg%3E");
+}
+
+.signal-line {
+  background-image: repeating-linear-gradient(90deg, rgba(245,244,236,.2) 0 1px, transparent 1px 8px);
+}
+
+/* Signal Deck refinement: the program deck is the physical main instrument; lime marks live signal and committed actions only. */
+.wordmark {
+  font-family: "Space Grotesk", "IBM Plex Sans JP", sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.055em;
+  text-transform: uppercase;
+  text-shadow: 1px 0 0 currentColor, 0 1px 0 rgba(245,244,236,.35);
+  line-height: .9;
+}
+
+.brand-engraving {
+  position: relative;
+  padding: 4px 7px 5px;
+  border-left: 1px solid rgba(216,255,62,.9);
+  background: linear-gradient(90deg, rgba(216,255,62,.09), transparent 76%);
+}
+.brand-engraving::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 7px;
+  height: 1px;
+  content: "";
+  background: repeating-linear-gradient(90deg, rgba(245,244,236,.45) 0 2px, transparent 2px 5px);
+}
+
+.console-panel {
+  background-image:
+    linear-gradient(90deg, rgba(245,244,236,.025) 1px, transparent 1px),
+    linear-gradient(rgba(245,244,236,.018) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+.primary-deck {
+  border-color: rgba(245, 244, 236, 0.32);
+  background:
+    linear-gradient(180deg, rgba(245, 244, 236, 0.035), transparent 25%),
+    #171914;
+  box-shadow: 12px 12px 0 rgba(0, 0, 0, 0.18), inset 0 2px 0 rgba(245,244,236,.5);
+}
+
+.calibrated-rules {
+  background-image:
+    repeating-linear-gradient(90deg, rgba(245,244,236,.22) 0 1px, transparent 1px 16px),
+    repeating-linear-gradient(90deg, transparent 0 79px, rgba(245,244,236,.18) 79px 80px);
+}
+
+.panel-notch::before,
+.panel-notch::after {
+  position: absolute;
+  width: 15px;
+  height: 15px;
+  content: "";
+  border-color: rgba(216,255,62,.8);
+  pointer-events: none;
+}
+.panel-notch::before { top: -1px; left: -1px; border-top: 2px solid; border-left: 2px solid; }
+.panel-notch::after { right: -1px; bottom: -1px; border-right: 2px solid; border-bottom: 2px solid; }
+
+.panel-notch-muted::before,
+.panel-notch-muted::after {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  content: "";
+  border-color: rgba(245,244,236,.5);
+  pointer-events: none;
+}
+.panel-notch-muted::before { top: -1px; left: -1px; border-top: 1px solid; border-left: 1px solid; }
+.panel-notch-muted::after { right: -1px; bottom: -1px; border-right: 1px solid; border-bottom: 1px solid; }
+
+.faceplate {
+  background-image:
+    repeating-linear-gradient(90deg, rgba(245,244,236,.17) 0 1px, transparent 1px 11px),
+    linear-gradient(180deg, rgba(245,244,236,.04), transparent 22px);
+  background-size: auto 1px, 100% 100%;
+  background-repeat: repeat-x, no-repeat;
+}
+
+.routing-bay {
+  background:
+    linear-gradient(90deg, rgba(216,255,62,.06) 0 2px, transparent 2px 100%),
+    repeating-linear-gradient(90deg, rgba(245,244,236,.035) 0 1px, transparent 1px 38px),
+    #191b16;
+  box-shadow: 8px 8px 0 rgba(0,0,0,.16), inset 0 1px 0 rgba(245,244,236,.24);
+}
+.routing-bay > :first-child {
+  background: linear-gradient(90deg, rgba(216,255,62,.07), transparent 45%);
+}
+.routing-bay-side {
+  background:
+    linear-gradient(180deg, rgba(245,244,236,.035), transparent 120px),
+    repeating-linear-gradient(180deg, rgba(245,244,236,.06) 0 1px, transparent 1px 43px),
+    #151712;
+}
+.signal-window {
+  box-shadow: inset 0 0 0 1px rgba(245,244,236,.07), inset 0 -12px 0 rgba(216,255,62,.025);
+}
+.signal-window::before,
+.signal-window::after {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  bottom: 8px;
+  width: 4px;
+  content: "";
+  background: repeating-linear-gradient(180deg, rgba(245,244,236,.75) 0 2px, transparent 2px 9px);
+}
+.signal-window::before { left: 9px; }
+.signal-window::after { right: 9px; }
+
+.range-control {
+  width: 100%;
+  height: 5px;
+  accent-color: #d8ff3e;
+  background: rgba(245,244,236,.15);
+}
+
+.playback-heavy-section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 900px;
+}
+
+/* Readable dense mode: preserve the console hierarchy without sub-10px labels or washed-out annotations. */
+.ui-dense [class*="text-[8px]"] { font-size: 10px; }
+.ui-dense [class*="text-[9px]"] { font-size: 11px; }
+.ui-dense [class*="text-[10px]"] { font-size: 12px; }
+.ui-dense [class*="text-[11px]"] { font-size: 12px; }
+.ui-dense [class*="text-[#72776d]"] { color: #a8aca2; }
+.ui-dense [class*="text-[#8b9085]"] { color: #b5b9ae; }
+.ui-dense [class*="text-[#a9aca2]"] { color: #c3c6bd; }
+
+@media (min-width: 1100px) {
+  .program-diagnostics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .signal-pulse { animation: signal-pulse 2.2s ease-in-out infinite; }
+  .entry-rise { animation: entry-rise .5s cubic-bezier(.23, 1, .32, 1) both; }
+  .entry-rise-delay { animation: entry-rise .55s .08s cubic-bezier(.23, 1, .32, 1) both; }
+}
+
+@keyframes signal-pulse { 50% { opacity: .35; } }
+@keyframes entry-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+@media (max-width: 760px) {
+  body { background-size: auto, auto, auto; }
+}

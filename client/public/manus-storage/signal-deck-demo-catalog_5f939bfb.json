@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "signal-deck-diagnostic",
+      "title": "Signal Deck — Diagnostic MDR",
+      "artist": "Awed",
+      "tags": ["diagnostic", "opm", "browser-test"],
+      "mdrUrl": "/manus-storage/signal-deck-diagnostic_d91a1673.mdr"
+    }
+  ]
+}
