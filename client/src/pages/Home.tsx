@@ -167,6 +167,12 @@ const KEYBOARD_WHITE_COUNT = KEYBOARD_OCTAVES * KEYBOARD_WHITE_PITCHES.length;
 const KEYBOARD_WHITE_IDLE = "#bfbfbf";
 const KEYBOARD_ACTIVE = "#d8ff3e";
 const KEYBOARD_ACTIVE_GLOW = "rgba(216,255,62,0.45)";
+const KEYBOARD_BED = "#2a2b28";
+const KEYBOARD_BLACK_IDLE = "#52564e";
+const KEYBOARD_BLACK_BORDER = "#1a1b18";
+/** Black keys sit in the upper ~62% of white-key depth on a real piano. */
+const KEYBOARD_BLACK_HEIGHT_RATIO = 0.62;
+const KEYBOARD_BLACK_WIDTH_RATIO = 0.52;
 
 /** LIVE KEYBOARD: channel ON/OFF strip only (no merged piano). PCM is pad activity, not pitch. */
 const ChannelNoteState = memo(function ChannelNoteState({ tracks, trackKeyState, mutedTracks, pcmActivityMask }: { tracks: MdrMixerTrack[]; trackKeyState: MdrTrackKeyState; mutedTracks: number[]; pcmActivityMask: number }) {
@@ -200,25 +206,51 @@ const TrackFullKeyboard = memo(function TrackFullKeyboard({ label, midiNotes, mu
   const litNames = Array.from(active).sort((left, right) => left - right).map((note) => formatMidiNoteName(note));
   const description = muted ? `${label}はミュート中です。` : litNames.length ? `${label}で${litNames.join("、")}が発音中です。` : `${label}は発音待機中です。`;
   const whiteWidthPercent = 100 / KEYBOARD_WHITE_COUNT;
-  const blackWidthPercent = whiteWidthPercent * 0.58;
+  const blackWidthPercent = whiteWidthPercent * KEYBOARD_BLACK_WIDTH_RATIO;
+  const blackHeightPercent = KEYBOARD_BLACK_HEIGHT_RATIO * 100;
   return <div data-testid="track-full-keyboard" className="min-w-0 flex-1 overflow-x-auto" role="img" aria-label={description}>
-    <div className={`relative min-w-[560px] overflow-hidden border border-white/15 bg-[#0c0d0a] ${dense ? "h-3.5 sm:h-4" : "h-7 sm:h-8"}`}>
-      <div className="absolute inset-0 flex">
+    <div
+      className={`relative min-w-[560px] overflow-hidden rounded-[1px] border border-white/20 ${dense ? "h-7 sm:h-8" : "h-10 sm:h-11"}`}
+      style={{ backgroundColor: KEYBOARD_BED }}
+    >
+      <div className="absolute inset-0 flex gap-0">
         {Array.from({ length: KEYBOARD_WHITE_COUNT }, (_, whiteIndex) => {
           const octave = Math.floor(whiteIndex / KEYBOARD_WHITE_PITCHES.length);
           const pitch = KEYBOARD_WHITE_PITCHES[whiteIndex % KEYBOARD_WHITE_PITCHES.length]!;
           const midiNote = KEYBOARD_MIDI_START + octave * 12 + pitch;
           const isActive = active.has(midiNote);
-          const startsOctave = whiteIndex % KEYBOARD_WHITE_PITCHES.length === 0;
-          return <span key={midiNote} title={formatMidiNoteName(midiNote)} className={`h-full flex-1 border-r border-black/35 ${startsOctave ? "border-l border-l-black/50" : ""}`} style={{ backgroundColor: isActive ? KEYBOARD_ACTIVE : KEYBOARD_WHITE_IDLE, boxShadow: isActive ? `inset 0 0 0 1px ${KEYBOARD_ACTIVE_GLOW}` : undefined }} />;
+          const isLastInOctave = whiteIndex % KEYBOARD_WHITE_PITCHES.length === KEYBOARD_WHITE_PITCHES.length - 1;
+          return <span
+            key={midiNote}
+            title={formatMidiNoteName(midiNote)}
+            className={`h-full min-w-0 flex-1 ${isLastInOctave ? "" : "border-r"}`}
+            style={{
+              backgroundColor: isActive ? KEYBOARD_ACTIVE : KEYBOARD_WHITE_IDLE,
+              borderRightColor: isActive ? "rgba(26,27,24,0.35)" : "rgba(26,27,24,0.55)",
+              borderRightWidth: "1px",
+              boxShadow: isActive ? `inset 0 -1px 0 ${KEYBOARD_ACTIVE_GLOW}` : "inset 0 -1px 0 rgba(0,0,0,0.12)",
+            }}
+          />;
         })}
       </div>
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[58%]">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10" style={{ height: `${blackHeightPercent}%` }}>
         {Array.from({ length: KEYBOARD_OCTAVES }, (_, octave) => KEYBOARD_BLACK_AFTER_WHITE.map(({ pitch, afterWhite }) => {
           const midiNote = KEYBOARD_MIDI_START + octave * 12 + pitch;
           const isActive = active.has(midiNote);
           const leftPercent = (octave * KEYBOARD_WHITE_PITCHES.length + afterWhite + 1) * whiteWidthPercent - blackWidthPercent / 2;
-          return <span key={midiNote} title={formatMidiNoteName(midiNote)} style={{ left: `${leftPercent}%`, width: `${blackWidthPercent}%`, backgroundColor: isActive ? KEYBOARD_ACTIVE : "#1a1c17", boxShadow: isActive ? `0 0 6px ${KEYBOARD_ACTIVE_GLOW}` : undefined }} className="absolute top-0 h-full rounded-b-[1px]" />;
+          return <span
+            key={midiNote}
+            title={formatMidiNoteName(midiNote)}
+            style={{
+              left: `${leftPercent}%`,
+              width: `${blackWidthPercent}%`,
+              height: "100%",
+              backgroundColor: isActive ? KEYBOARD_ACTIVE : KEYBOARD_BLACK_IDLE,
+              border: `1px solid ${isActive ? KEYBOARD_ACTIVE_GLOW : KEYBOARD_BLACK_BORDER}`,
+              boxShadow: isActive ? `0 0 6px ${KEYBOARD_ACTIVE_GLOW}` : "0 1px 0 rgba(255,255,255,0.08)",
+            }}
+            className="absolute top-0 rounded-b-[2px]"
+          />;
         }))}
       </div>
     </div>
@@ -1375,7 +1407,8 @@ export default function Home() {
         setMmlError(message);
         setNotice(`MML構文エラー — ${message}`);
       } else {
-        setNotice(error instanceof Error ? error.message : "MMLを再生できませんでした。");
+        const fallback = mode === "mml" ? "MMLを再生できませんでした。" : "MDR／MDXを再生できませんでした。";
+        setNotice(error instanceof Error ? error.message : typeof error === "string" ? error : fallback);
       }
     } finally {
       setIsPreparingPlayback(false);
@@ -1706,7 +1739,7 @@ export default function Home() {
                         <p className={`mono m-0 text-[11px] font-medium ${meta.tone}`}>{meta.label}</p>
                         <p className="mono m-0 mt-0.5 text-[7px] uppercase tracking-[0.08em] text-[#8b9085]">{busTracks.length} ch{mutedBusCount ? ` · ${mutedBusCount}m` : ""}</p>
                       </div>
-                      <span className={`mono w-14 shrink-0 truncate text-[8px] ${lit ? "text-primary" : "text-[#6f746a]"}`} title={lit || "Awaiting"}>{lit || "·"}</span>
+                      <span className={`mono w-16 shrink-0 truncate text-center text-[11px] font-semibold leading-none tracking-tight ${lit ? "text-primary" : "text-[#6f746a]"}`} title={lit || "Awaiting"}>{lit || "·"}</span>
                       <TrackFullKeyboard label={meta.label} midiNotes={notes} muted={false} dense={false} />
                     </div>;
                   })}
@@ -1720,9 +1753,9 @@ export default function Home() {
                     const tone = track.engine === "opm" ? "text-primary" : isPad ? "text-[#b9c9b1]" : "text-[#a8c5ec]";
                     const keys = trackKeyState[track.index] ?? emptyMidiNotes;
                     const lit = isPad ? "" : (!muted && keys.length > 0 ? keys.map((note) => formatMidiNoteName(note)).join(" ") : "");
-                    return <div key={track.index} className={`flex items-center gap-1.5 bg-[#11120f] px-1.5 py-0.5 ${muted ? "opacity-55" : ""}`}>
+                    return <div key={track.index} className={`flex items-center gap-1.5 bg-[#11120f] px-1.5 py-1 ${muted ? "opacity-55" : ""}`}>
                       <p className={`mono m-0 w-[3.6rem] shrink-0 truncate text-[9px] font-medium ${tone}`} title={track.label}>{track.label}</p>
-                      <span className={`mono w-8 shrink-0 truncate text-[7px] uppercase tracking-[0.06em] ${muted ? "text-[#ff9b94]" : lit ? "text-primary" : "text-[#6f746a]"}`} title={lit || (muted ? "Muted" : isPad ? "Pad · live keyboard" : "Awaiting")}>{muted ? "MUTE" : isPad ? "PAD" : lit || "·"}</span>
+                      <span className={`mono w-12 shrink-0 truncate text-center text-[11px] font-semibold leading-none tracking-tight ${muted ? "text-[#ff9b94]" : lit ? "text-primary" : "text-[#6f746a]"}`} title={lit || (muted ? "Muted" : isPad ? "Pad · live keyboard" : "Awaiting")}>{muted ? "MUTE" : isPad ? "PAD" : lit || "·"}</span>
                       {isPad
                         ? <div className="min-w-0 flex-1" aria-hidden="true" />
                         : <TrackFullKeyboard label={track.label} midiNotes={keys} muted={muted} />}

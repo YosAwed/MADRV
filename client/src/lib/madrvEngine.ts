@@ -138,6 +138,12 @@ export function isCurrentPlaybackGeneration(callbackGeneration: number, activeGe
   return Number.isInteger(callbackGeneration) && Number.isInteger(activeGeneration) && callbackGeneration === activeGeneration;
 }
 
+function asPlaybackError(error: unknown, fallback: string): Error {
+  if (error instanceof Error) return error;
+  if (typeof error === "string" && error.trim()) return new Error(error);
+  return new Error(fallback);
+}
+
 function throwIfPlaybackSuperseded(callbackGeneration: number, activeGeneration: number): void {
   if (!isCurrentPlaybackGeneration(callbackGeneration, activeGeneration)) {
     throw new Error("Playback was superseded by a newer source.");
@@ -1372,7 +1378,12 @@ class MadrvWasmPlayer {
     const sourcePointer = this.copyTo(this.converter, source);
     try {
       const convert = this.converter._madrv_convert_mdr as (pointer: number, length: number) => number;
-      const size = convert(sourcePointer, source.length);
+      let size = 0;
+      try {
+        size = convert(sourcePointer, source.length);
+      } catch (error) {
+        throw asPlaybackError(error, "MDRをOPM／PDX再生用データへ変換できませんでした。");
+      }
       if (size <= 0) throw new Error("MDRをOPM／PDX再生用データへ変換できませんでした。");
       const convertedPointer = this.converter._malloc(size);
       try {
@@ -2271,13 +2282,20 @@ export class SignalDeckAudio {
     throwIfPlaybackSuperseded(playbackGeneration, this.playbackGeneration);
     this.restoreMdrSoundFont();
     const sourceInfo = inspectMdr(mdr);
-    const needsHardwareRenderer = requiresMdrHardwareRenderer(sourceInfo.hardwareTracks);
+    let needsHardwareRenderer = requiresMdrHardwareRenderer(sourceInfo.hardwareTracks);
     if (sourceInfo.midiTracks > 0 && !this.midiOutput && !this.gsLoaded) throw new Error("このMDRにはGS MIDIトラックがあります。SoundFont bankでSF2/DLSを読み込むか、External MIDIを選択してから再生してください。");
     const measuredLoops = loops <= 0 ? 1 : loops;
     let info: MdrPlaybackInfo;
     if (needsHardwareRenderer) {
-      this.mdrPlayer ??= new MadrvWasmPlayer();
-      info = await this.mdrPlayer.load(mdr, pdx, 1, context.sampleRate);
+      try {
+        this.mdrPlayer ??= new MadrvWasmPlayer();
+        info = await this.mdrPlayer.load(mdr, pdx, 1, context.sampleRate);
+      } catch (error) {
+        // Only GS-capable MDR may skip OPM conversion. MDX and OPM-only MDR keep failing loudly.
+        if (sourceInfo.midiTracks <= 0) throw asPlaybackError(error, "MDRをOPM／PDX再生用データへ変換できませんでした。");
+        needsHardwareRenderer = false;
+        info = { duration: 0, format: "MDR / GS MIDI" };
+      }
     } else {
       info = { duration: 0, format: "MDR / GS MIDI" };
     }
