@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { extractMdrTempoTimerB, extractMmlInitialTempo, fetchRemoteSoundFont, fetchSharedSoundFont, formatMidiNoteName, formatPdxFileName, inspectMadrvSource, inspectMdr, inspectMdx, isCurrentPlaybackGeneration, isGsMidiEngineArmed, isMidiPlaybackDestinationReady, isOpmPcmEngineArmed, isPcmPdxEngineArmed, isSafariBrowserUserAgent, isSignedTimingCorrectionDraft, isWasmPcmRenderFailure, listMdrMixerTracks, MADRV_DEFAULT_TEMPO_TIMER_B, mdrRequiresPdx, mxdrvRawNoteToMidiNote, mxdrvRawNoteToPitchClass, normalizeExternalMidiAdvanceMs, normalizeSoundFontMdrDelayMs, normalizeSoundFontMdrDelayProfiles, parseRemoteCatalogPayload, playbackProgressPercent, recommendPlaybackTuning, requiresMdrHardwareRenderer, requiresStableMadrvProfileForSoundFont, resamplePcmFrames, resolveExternalMidiDispatchAtSeconds, resolveMdrDisplayTempoTimerB, resolveMdrHardwareLoopCycleSeconds, resolveMdrInfiniteMidiCycle, resolveMdrInfiniteMidiLoopPeriodSeconds, resolveMdrMidiLiveTargetAtSeconds, resolveMdrMidiLookaheadSeconds, resolveMdrMidiLoopDispatchAtSeconds, resolveMdrMidiPumpIntervalMs, resolveMdrMidiTimingSampleRate, resolveMdrPlaybackDuration, resolveMdrRendererLatencySeconds, resolveMdrTrackEngine, resolveMdxPlaybackTick, resolveNextPlaylistIndex, resolvePlaybackSampleRate, resolvePlaylistInterTrackSilenceSeconds, resolveProgressUpdateIntervalMs, resolveRealtimeVisualUpdateIntervalMs, resolveScriptProcessorBufferSize, resolveSoundFontMdrDelayProfile, resolveSoundFontMdrScheduleAtSeconds, resolveSoundFontMdrTimingComparisonDelay, resolveTrustedMdrMidiLoopWindow, selectMdrInfiniteMidiLoopEvents, selectMdrMidiLoopWindowEvents, setSoundFontMdrDelayProfile, shouldDispatchQueuedSoundFontMdrEvent, shouldScheduleMdrMidiDirectlyAtLoopStart, shouldSkipMdrMidiEventAtLoopCycle, shouldStopGsSynthImmediatelyForMdrReset, stepSoundFontMdrDelayMs, timerBToEstimatedBpm, updateMidiTrackNotes } from "./madrvEngine";
+import { extractMdrTempoTimerB, extractMmlInitialTempo, fetchRemoteSoundFont, fetchSharedSoundFont, formatMidiNoteName, formatPdxFileName, inspectMadrvSource, inspectMdr, inspectMdx, isCurrentPlaybackGeneration, isGsMidiEngineArmed, isMidiPlaybackDestinationReady, isOpmPcmEngineArmed, isPcmPdxEngineArmed, isSafariBrowserUserAgent, isSignedTimingCorrectionDraft, isWasmPcmRenderFailure, listMdrMixerTracks, MADRV_DEFAULT_TEMPO_TIMER_B, mdrRequiresPdx, mxdrvRawNoteToMidiNote, mxdrvRawNoteToPitchClass, normalizeExternalMidiAdvanceMs, normalizeSoundFontMdrDelayMs, normalizeSoundFontMdrDelayProfiles, parseRemoteCatalogPayload, playbackProgressPercent, recommendPlaybackTuning, recommendSoundFontMdrDelayMs, requiresMdrHardwareRenderer, requiresStableMadrvProfileForSoundFont, resamplePcmFrames, resolveExternalMidiDispatchAtSeconds, resolveMdrDisplayTempoTimerB, resolveMdrHardwareLoopCycleSeconds, resolveMdrInfiniteMidiCycle, resolveMdrInfiniteMidiLoopPeriodSeconds, resolveMdrMidiLiveTargetAtSeconds, resolveMdrMidiLookaheadSeconds, resolveMdrMidiLoopDispatchAtSeconds, resolveMdrMidiPumpIntervalMs, resolveMdrMidiTimingSampleRate, resolveMdrPlaybackDuration, resolveMdrPlaybackFailsafeSeconds, resolveMdrPlaybackStartLatencySeconds, resolveMdrRendererLatencySeconds, resolveMdrTrackEngine, resolveMdxPlaybackTick, resolveNextPlaylistIndex, resolvePlaybackSampleRate, resolvePlaylistInterTrackSilenceSeconds, resolveProgressUpdateIntervalMs, resolveRealtimeVisualUpdateIntervalMs, resolveScriptProcessorBufferSize, resolveSoundFontMdrDelayProfile, resolveSoundFontMdrDispatchAtSeconds, resolveSoundFontMdrScheduleAtSeconds, resolveSoundFontMdrSyncResidualMs, resolveSoundFontMdrTimingComparisonDelay, resolveTrustedMdrMidiLoopWindow, selectMdrInfiniteMidiLoopEvents, selectMdrMidiLoopWindowEvents, setSoundFontMdrDelayProfile, shouldDispatchQueuedSoundFontMdrEvent, shouldEndFiniteMdrPlayback, shouldScheduleMdrMidiDirectlyAtLoopStart, shouldSkipMdrMidiEventAtLoopCycle, shouldStopGsSynthImmediatelyForMdrReset, stepSoundFontMdrDelayMs, timerBToEstimatedBpm, updateMidiTrackNotes, updateSoundFontMdrDelayMeasurement } from "./madrvEngine";
 
 function makeDiagnosticMdr(midiTrackIndex = -1, legacyMidiTrackIndex = -1): ArrayBuffer {
   const title = new TextEncoder().encode("Signal Deck Diagnostic\r\n\x1aNONE\0");
@@ -291,13 +291,47 @@ describe("SoundFont MDR timing correction", () => {
 
   it("bounds a local SoundFont delay and postpones only the scheduled internal MIDI edge", () => {
     expect(normalizeSoundFontMdrDelayMs(12.6)).toBe(13);
-    expect(normalizeSoundFontMdrDelayMs(999)).toBe(100);
-    expect(normalizeSoundFontMdrDelayMs(-999)).toBe(-100);
+    expect(normalizeSoundFontMdrDelayMs(999)).toBe(350);
+    expect(normalizeSoundFontMdrDelayMs(-999)).toBe(-350);
     expect(stepSoundFontMdrDelayMs(-2, 1)).toBe(-1);
-    expect(stepSoundFontMdrDelayMs(100, 1)).toBe(100);
-    expect(stepSoundFontMdrDelayMs(-100, -1)).toBe(-100);
+    expect(stepSoundFontMdrDelayMs(350, 1)).toBe(350);
+    expect(stepSoundFontMdrDelayMs(-350, -1)).toBe(-350);
     expect(resolveSoundFontMdrScheduleAtSeconds(4, 18)).toBeCloseTo(4.018, 6);
     expect(resolveSoundFontMdrScheduleAtSeconds(4, -18)).toBeCloseTo(3.982, 6);
+    expect(resolveSoundFontMdrDispatchAtSeconds(4, 18)).toBeCloseTo(4.018, 6);
+    expect(resolveSoundFontMdrDispatchAtSeconds(0.01, -18)).toBe(0);
+  });
+
+  it("ends hybrid MDR on MXDRV termination and GS-only MDR on MIDI timeline completion", () => {
+    expect(shouldEndFiniteMdrPlayback(true, false, true)).toBe(false);
+    expect(shouldEndFiniteMdrPlayback(true, true, false)).toBe(true);
+    expect(shouldEndFiniteMdrPlayback(false, false, false)).toBe(false);
+    expect(shouldEndFiniteMdrPlayback(false, true, true)).toBe(true);
+  });
+
+  it("keeps a generous wall-clock failsafe for hybrid MDR playback", () => {
+    expect(resolveMdrPlaybackFailsafeSeconds(180)).toBeCloseTo(255, 5);
+    expect(resolveMdrPlaybackFailsafeSeconds(0)).toBe(60);
+  });
+
+  it("recommends a browser-local SoundFont delay from the active audio path", () => {
+    const desktop = recommendSoundFontMdrDelayMs({ profile: "desktop", sampleRate: 48_000, outputLatencySeconds: 0.04, baseLatencySeconds: 0.01 });
+    expect(desktop.rendererMs).toBe(43);
+    expect(desktop.lookaheadMs).toBe(150);
+    expect(desktop.totalMs).toBeLessThan(0);
+    const mobile = recommendSoundFontMdrDelayMs({ profile: "mobile", sampleRate: 44_100, frameP95Ms: 40 });
+    expect(mobile.rendererMs).toBeGreaterThan(300);
+    expect(mobile.totalMs).toBeGreaterThan(0);
+  });
+
+  it("smooths live MXDRV sync residuals into a suggested total correction", () => {
+    const snapshot = { scheduledSeconds: 12.4, dispatchedSeconds: 12.55, hardwareMilliseconds: 12_620 };
+    expect(resolveSoundFontMdrSyncResidualMs(snapshot)).toBeCloseTo(220, 5);
+    const first = updateSoundFontMdrDelayMeasurement(null, snapshot, 30);
+    expect(first?.suggestedTotalMs).toBe(250);
+    const second = updateSoundFontMdrDelayMeasurement(first, { ...snapshot, hardwareMilliseconds: 12_500 }, 30);
+    expect(second?.sampleCount).toBe(2);
+    expect(second?.suggestedTotalMs).toBeLessThan(250);
   });
 
   it("keeps separate persisted corrections for each SoundFont and falls back to the historic common correction", () => {
@@ -420,6 +454,8 @@ describe("AudioContext clock synchronization", () => {
   it("aligns MIDI start with the ScriptProcessor block that carries audible OPM and PCM", () => {
     expect(resolveMdrRendererLatencySeconds("desktop", 48_000)).toBeCloseTo(2048 / 48_000, 8);
     expect(resolveMdrRendererLatencySeconds("mobile", 44_100)).toBeCloseTo(16384 / 44_100, 8);
+    expect(resolveMdrPlaybackStartLatencySeconds("desktop", 48_000, 0.04, 0.01)).toBeCloseTo(0.025 + 2048 / 48_000 + 0.04, 8);
+    expect(resolveMdrPlaybackStartLatencySeconds("mobile", 44_100, 0, 0)).toBeCloseTo(0.025 + 16384 / 44_100, 8);
   });
 });
 
@@ -544,10 +580,13 @@ describe("MDX output sample-clock conversion", () => {
 
 describe("MDR track keyboard state", () => {
   it("converts MXDRV's shifted note value into a chromatic key and MIDI note", () => {
-    expect(mxdrvRawNoteToPitchClass(3203)).toBe(2);
-    expect(mxdrvRawNoteToMidiNote(3203)).toBe(50);
-    expect(mxdrvRawNoteToPitchClass(389)).toBe(6);
-    expect(mxdrvRawNoteToMidiNote(389)).toBe(6);
+    // raw 3203 → MDX note 50 (o4f) → MIDI 53 (F3); MDX index 0 is o0d♯ (+3)
+    expect(mxdrvRawNoteToPitchClass(3203)).toBe(5);
+    expect(mxdrvRawNoteToMidiNote(3203)).toBe(53);
+    expect(mxdrvRawNoteToPitchClass(389)).toBe(9);
+    expect(mxdrvRawNoteToMidiNote(389)).toBe(9);
+    expect(mxdrvRawNoteToMidiNote(45 * 64 + 5)).toBe(48); // o4c → C3
+    expect(formatMidiNoteName(mxdrvRawNoteToMidiNote(45 * 64 + 5)!)).toBe("C3");
     expect(mxdrvRawNoteToPitchClass(-1)).toBeNull();
     expect(mxdrvRawNoteToMidiNote(-1)).toBeNull();
   });

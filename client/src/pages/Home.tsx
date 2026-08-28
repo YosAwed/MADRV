@@ -1,4 +1,5 @@
 /* Signal Deck page: an asymmetrical studio console where source, signal paths, and controls stay visually distinct. */
+import { FormatGuideDialog } from "@/components/FormatGuideDialog";
 import { Button } from "@/components/ui/button";
 import {
   AlertTriangle,
@@ -23,9 +24,10 @@ import {
   Waves,
 } from "lucide-react";
 import { ChangeEvent, DragEvent, memo, useEffect, useMemo, useRef, useState } from "react";
-import { compileMml, extractMmlInitialTempo, fetchRemoteCatalog, fetchRemoteSoundFont, fetchSharedSoundFont, formatMidiNoteName, formatPdxFileName, inspectMadrvSource, inspectMdr, inspectMdx, isGoogleDriveShareUrl, isGsMidiEngineArmed, isMidiPlaybackDestinationReady, isOpmPcmEngineArmed, isPcmPdxEngineArmed, isPcmVoiceActive, isSafariBrowserUserAgent, isSignedTimingCorrectionDraft, limitScore, listMdrMixerTracks, mdrRequiresPdx, MdrInfo, MdrMixerTrack, MdxInfo, MidiDiagnosticEntry, MidiOutputDevice, MmlSyntaxError, normalizeExternalMidiAdvanceMs, normalizeRemoteAssetUrl, normalizeSoundFontMdrDelayMs, normalizeSoundFontMdrDelayProfiles, parseRemoteCatalogPayload, playbackProgressPercent, recommendPlaybackTuning, RemoteCatalogEntry, requiresStableMadrvProfileForSoundFont, resolveNextPlaylistIndex, resolvePlaylistInterTrackSilenceSeconds, resolveSoundFontMdrDelayProfile, resolveSoundFontMdrTimingComparisonDelay, setSoundFontMdrDelayProfile, SignalDeckAudio, stepSoundFontMdrDelayMs, timerBToEstimatedBpm, type MdrMidiSyncSnapshot, type MdrTrackKeyState, type PlaybackPerformanceProfile, type PlaybackTuningPreset, type PlaybackTuningRecommendation, type SoundFontMdrDelayProfiles, type SoundFontMdrTimingComparisonMode } from "@/lib/madrvEngine";
+import { compileMml, extractMmlInitialTempo, fetchRemoteCatalog, fetchRemoteSoundFont, fetchSharedSoundFont, formatMidiNoteName, formatPdxFileName, inspectMadrvSource, inspectMdr, inspectMdx, isGoogleDriveShareUrl, isGsMidiEngineArmed, isMidiPlaybackDestinationReady, isOpmPcmEngineArmed, isPcmPdxEngineArmed, isPcmVoiceActive, isSafariBrowserUserAgent, isSignedTimingCorrectionDraft, limitScore, listMdrMixerTracks, mdrRequiresPdx, MdrInfo, MdrMixerTrack, MdxInfo, MidiDiagnosticEntry, MidiOutputDevice, MmlSyntaxError, normalizeExternalMidiAdvanceMs, normalizeRemoteAssetUrl, normalizeSoundFontMdrDelayMs, normalizeSoundFontMdrDelayProfiles, parseRemoteCatalogPayload, playbackProgressPercent, recommendPlaybackTuning, recommendSoundFontMdrDelayMs, RemoteCatalogEntry, requiresStableMadrvProfileForSoundFont, resolveNextPlaylistIndex, resolvePlaylistInterTrackSilenceSeconds, resolveSoundFontMdrDelayProfile, resolveSoundFontMdrTimingComparisonDelay, setSoundFontMdrDelayProfile, SignalDeckAudio, stepSoundFontMdrDelayMs, timerBToEstimatedBpm, updateSoundFontMdrDelayMeasurement, type MdrMidiSyncSnapshot, type MdrTrackKeyState, type PlaybackPerformanceProfile, type PlaybackTuningPreset, type PlaybackTuningRecommendation, type SoundFontMdrDelayMeasurement, type SoundFontMdrDelayProfiles, type SoundFontMdrTimingComparisonMode } from "@/lib/madrvEngine";
 import { DEFAULT_PLAYLIST_LOOP_COUNT, isPersistablePlaylistEntry, movePlaylistEntry, normalizePlaylistLoopCount, parseSavedPlaylist, SAVED_PLAYLIST_STORAGE_KEY, setPlaylistEntryLoopCount, type SavedPlaylistEntry } from "@/lib/playlistEntries";
 import { parseRecentSources, RECENT_SOURCES_STORAGE_KEY, removeRecentSource, upsertRecentSource, type RecentSource } from "@/lib/recentSources";
+import { persistLocalSoundFontSelection, persistRemoteSoundFontSelection, readCachedLocalSoundFont, readPersistedSoundFontSelection } from "@/lib/soundFontStorage";
 import { useIsMobile } from "@/hooks/useMobile";
 import { trpc } from "@/lib/trpc";
 
@@ -259,6 +261,14 @@ const TrackFullKeyboard = memo(function TrackFullKeyboard({ label, midiNotes, mu
 
 type KeyboardMatrixMode = "tracks" | "engines";
 const KEYBOARD_MATRIX_MODE_KEY = "madrv-player.keyboard-matrix-mode-v1";
+const PLAYBACK_TUNING_STORAGE_KEY = "madrv-player.playback-tuning-preset-v1";
+
+type PlaybackTuningSelection = "auto" | PlaybackTuningPreset;
+
+function parsePlaybackTuningPreset(value: string | null): PlaybackTuningSelection {
+  if (value === "auto" || value === "standard" || value === "low-latency" || value === "stable") return value;
+  return "auto";
+}
 /** Track matrix keyboards: pitched buses only (PCM has no meaningful keyboard). */
 const ENGINE_BUS_ORDER = ["opm", "midi"] as const;
 const ENGINE_BUS_META: Record<(typeof ENGINE_BUS_ORDER)[number], { label: string; tone: string; note: string }> = {
@@ -327,6 +337,8 @@ export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPreparingPlayback, setIsPreparingPlayback] = useState(false);
   const [audioSampleRate, setAudioSampleRate] = useState(48_000);
+  const [audioLatencyInfo, setAudioLatencyInfo] = useState({ sampleRate: 48_000, outputLatencySeconds: 0, baseLatencySeconds: 0 });
+  const [soundFontMdrDelayMeasurement, setSoundFontMdrDelayMeasurement] = useState<SoundFontMdrDelayMeasurement | null>(null);
   const [timerB, setTimerB] = useState<number | null>(null);
   const [hardwarePlaybackPositionMs, setHardwarePlaybackPositionMs] = useState<number | null>(null);
   const [mdrMidiSync, setMdrMidiSync] = useState<MdrMidiSyncSnapshot | null>(null);
@@ -405,7 +417,14 @@ export default function Home() {
   const [isExporting, setIsExporting] = useState(false);
   const [mmlError, setMmlError] = useState<string | null>(null);
   const [loadDiagnosis, setLoadDiagnosis] = useState<LoadDiagnosis>({ measuring: false });
-  const [tuningPreset, setTuningPreset] = useState<"auto" | PlaybackTuningPreset>("auto");
+  const [tuningPreset, setTuningPresetState] = useState<PlaybackTuningSelection>(() => {
+    try { return parsePlaybackTuningPreset(window.localStorage.getItem(PLAYBACK_TUNING_STORAGE_KEY)); } catch { return "auto"; }
+  });
+  const setTuningPreset = (preset: PlaybackTuningSelection) => {
+    setTuningPresetState(preset);
+    try { window.localStorage.setItem(PLAYBACK_TUNING_STORAGE_KEY, preset); } catch { /* Preference remains active for this session. */ }
+  };
+  const [formatGuideOpen, setFormatGuideOpen] = useState(false);
   const [notice, setNotice] = useState("MDR／MDX／PDXファイルを選択、またはここへドラッグして読み込みます。");
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [mdrInfo, setMdrInfo] = useState<MdrInfo | null>(null);
@@ -418,6 +437,9 @@ export default function Home() {
   const soundFontBankButtonRef = useRef<HTMLButtonElement>(null);
   const audioRef = useRef<SignalDeckAudio | null>(null);
   const sessionRestoredRef = useRef(false);
+  const sessionRestoreSourceLoadingRef = useRef(false);
+  const sessionSoundFontTemporaryRef = useRef(false);
+  const sessionInitialSourceKeyRef = useRef<string | null>(null);
   const playlistRunRef = useRef(false);
   const playlistStartRequestRef = useRef(0);
   const diagnosisRequestRef = useRef(0);
@@ -425,6 +447,12 @@ export default function Home() {
   const sharedSessionCreate = trpc.sharedSession.create.useMutation();
   const trpcUtils = trpc.useUtils();
   const activeSoundFontMdrDelayMs = resolveSoundFontMdrTimingComparisonDelay(soundFontMdrDelayMs, soundFontTimingComparisonMode);
+
+  function refreshAudioClock() {
+    const info = audio().getAudioLatencyInfo();
+    setAudioSampleRate(info.sampleRate);
+    setAudioLatencyInfo(info);
+  }
 
   function audio() {
     if (!audioRef.current) audioRef.current = new SignalDeckAudio();
@@ -566,11 +594,28 @@ export default function Home() {
     return isMobile ? "mobile" : "desktop";
   }, [isMobile, isSafari, loadDiagnosis.recommendation?.preset, soundFontByteLength, tuningPreset]);
   const safariCompatibilityMode = isSafari && tuningPreset !== "low-latency";
+  const soundFontMdrDelayRecommendation = useMemo(
+    () => recommendSoundFontMdrDelayMs({
+      profile: activePerformanceProfile,
+      sampleRate: audioLatencyInfo.sampleRate,
+      outputLatencySeconds: audioLatencyInfo.outputLatencySeconds,
+      baseLatencySeconds: audioLatencyInfo.baseLatencySeconds,
+      frameP95Ms: loadDiagnosis.frameP95Ms,
+    }),
+    [activePerformanceProfile, audioLatencyInfo, loadDiagnosis.frameP95Ms],
+  );
+
+  useEffect(() => {
+    if (!isPlaying || midiOutputMode !== "soundfont" || !mdrMidiSync || !mdrInfo?.hardwareTracks) {
+      if (!isPlaying) setSoundFontMdrDelayMeasurement(null);
+      return;
+    }
+    setSoundFontMdrDelayMeasurement((current) => updateSoundFontMdrDelayMeasurement(current, mdrMidiSync, activeSoundFontMdrDelayMs));
+  }, [activeSoundFontMdrDelayMs, isPlaying, mdrInfo?.hardwareTracks, mdrMidiSync, midiOutputMode]);
 
   async function diagnoseLoadedSource(source: ArrayBuffer, pdx: ArrayBuffer | undefined, hardwareTracks: number, midiTracks: number) {
     const requestId = ++diagnosisRequestRef.current;
     setLoadDiagnosis({ measuring: true });
-    setTuningPreset("auto");
     const frameGaps: number[] = [];
     let priorFrame = performance.now();
     for (let index = 0; index < 3; index += 1) {
@@ -660,14 +705,25 @@ export default function Home() {
       setExportLimit(bounded(String(payload.exportLimit), 60, 10, 600));
       setCatalogUrl(payload.catalogUrl?.trim() ?? "");
       const restoredSoundfont = payload.soundFontUrl?.trim() ?? "";
-      setRemoteSoundfontUrl(restoredSoundfont);
-      if (restoredSoundfont) void loadRemoteSoundFont(restoredSoundfont);
+      sessionInitialSourceKeyRef.current = payload.source.kind === "remote"
+        ? sourceKeyForRemote(payload.source.mdrUrl, payload.source.pdxUrl)
+        : `mml:${payload.source.mml}`;
+      if (restoredSoundfont) {
+        sessionSoundFontTemporaryRef.current = true;
+        setRemoteSoundfontUrl(restoredSoundfont);
+        void loadRemoteSoundFont(restoredSoundfont, { persistSelection: false });
+      } else {
+        void restorePersistedSoundFont();
+      }
       if (payload.source.kind === "remote") {
         setRemoteMdr(payload.source.mdrUrl);
         setRemotePdx(payload.source.pdxUrl ?? "");
         setMode("remote");
         setNotice(`${label}を復元しました。公開MDRを読み込みます。再生はこのブラウザでPLAYを押して開始してください。`);
-        void loadRemoteEntry(payload.source.mdrUrl, payload.source.pdxUrl, label);
+        sessionRestoreSourceLoadingRef.current = true;
+        void loadRemoteEntry(payload.source.mdrUrl, payload.source.pdxUrl, label).finally(() => {
+          sessionRestoreSourceLoadingRef.current = false;
+        });
         return;
       }
       setMode("mml");
@@ -678,10 +734,14 @@ export default function Home() {
     if (shortSessionId) {
       void trpcUtils.sharedSession.get.fetch({ id: shortSessionId }).then((payload) => restoreSessionPayload(payload, "短縮共有セッション")).catch((error: unknown) => {
         setNotice(error instanceof Error ? error.message : "短縮共有セッションを復元できませんでした。リンクが正しいか確認してください。");
+        void restorePersistedSoundFont();
       });
       return;
     }
-    if (params.get("sd") !== "1") return;
+    if (params.get("sd") !== "1") {
+      void restorePersistedSoundFont();
+      return;
+    }
     const restoredMdr = params.get("mdr")?.trim() ?? "";
     const restoredPdx = params.get("pdx")?.trim() ?? "";
     const restoredMml = params.get("mml");
@@ -691,7 +751,9 @@ export default function Home() {
     }
     if (restoredMml) {
       restoreSessionPayload({ source: { kind: "mml", mml: restoredMml }, loopCount: params.get("loops") === "infinite" ? 0 : bounded(params.get("loops"), 1, 1, 99), exportLimit: bounded(params.get("maxSec"), 60, 10, 600), catalogUrl: params.get("catalog")?.trim() ?? "", soundFontUrl: params.get("sf")?.trim() ?? "" }, "共有セッション");
+      return;
     }
+    void restorePersistedSoundFont();
   }, []);
 
   const sourceTitle = useMemo(() => {
@@ -758,6 +820,7 @@ export default function Home() {
   }
 
   async function loadLocalFiles(files: File[]) {
+    await maybeRevertSessionSoundFontBeforeSourceLoad();
     const mdrFile = files.find((file) => file.name.toLowerCase().endsWith(".mdr"));
     const mdxFile = files.find((file) => file.name.toLowerCase().endsWith(".mdx"));
     const pdxFiles = files.filter((file) => file.name.toLowerCase().endsWith(".pdx"));
@@ -836,6 +899,7 @@ export default function Home() {
   }
 
   async function loadLocalFolder(files: File[]) {
+    await maybeRevertSessionSoundFontBeforeSourceLoad();
     const sources = files.filter((file) => /\.(mdr|mdx)$/i.test(file.name)).sort((left, right) => (left.webkitRelativePath || left.name).localeCompare(right.webkitRelativePath || right.name, "ja"));
     const pdxFiles = files.filter((file) => /\.pdx$/i.test(file.name));
     if (!sources.length) {
@@ -892,18 +956,26 @@ export default function Home() {
     if (!soundfont) return;
     setSoundfontName("Loading SoundFont…");
     try {
-      await audio().loadSoundFont(soundfont);
+      const data = await soundfont.arrayBuffer();
+      await audio().loadSoundFontData(data);
+      await persistLocalSoundFontSelection(soundfont, data);
+      sessionSoundFontTemporaryRef.current = false;
+      sessionInitialSourceKeyRef.current = null;
+      setRemoteSoundfontUrl("");
       setSoundfontName(soundfont.name);
       setSoundFontByteLength(soundfont.size);
       activateSoundFontTimingProfile(`local:${soundfont.name}:${soundfont.size}:${soundfont.lastModified}`);
-      setNotice("GS MIDI出力用のSoundFontを読み込みました。MMLで@MIDIを指定すると使用します。");
+      setRemoteSoundfontProgress({ loadedBytes: soundfont.size, totalBytes: soundfont.size, stage: "ready" });
+      setNotice("GS MIDI出力用のSoundFontを読み込みました。次回訪問時もこのブラウザから自動復元します。");
     } catch (error) {
       setSoundfontName("SoundFont load failed");
       setNotice(error instanceof Error ? `SoundFontを読み込めませんでした: ${error.message}` : "SoundFontを読み込めませんでした。");
+      setRemoteSoundfontProgress(current => current ? { ...current, stage: "failed" } : { loadedBytes: 0, totalBytes: null, stage: "failed" });
     }
   }
 
-  async function loadRemoteSoundFont(sourceUrl = remoteSoundfontUrl) {
+  async function loadRemoteSoundFont(sourceUrl = remoteSoundfontUrl, options: { persistSelection?: boolean } = {}) {
+    const persistSelection = options.persistSelection ?? true;
     setRemoteSoundfontLoading(true);
     setSoundfontName("Loading remote SoundFont…");
     setRemoteSoundfontProgress({ loadedBytes: 0, totalBytes: null, stage: "downloading" });
@@ -920,8 +992,19 @@ export default function Home() {
       setSoundfontName(`Remote · ${remoteName}`);
       setSoundFontByteLength(downloadedBytes);
       activateSoundFontTimingProfile(`remote:${sourceUrl.trim()}`);
+      if (persistSelection) {
+        persistRemoteSoundFontSelection(sourceUrl);
+        sessionSoundFontTemporaryRef.current = false;
+        sessionInitialSourceKeyRef.current = null;
+      }
       const transport = "transport" in result ? result.transport : "direct";
-      setNotice(usesStorageProxy && transport === "proxy" ? "共有ストレージのSoundFontを補助取得経路からブラウザ内へ読み込みました。" : "CORS対応SoundFontをブラウザ内へ直接読み込みました。MDRとMMLのGS MIDIトラックに使用します。");
+      setNotice(persistSelection
+        ? usesStorageProxy && transport === "proxy"
+          ? "共有ストレージのSoundFontを補助取得経路からブラウザ内へ読み込みました。次回訪問時もこのブラウザから自動復元します。"
+          : "CORS対応SoundFontをブラウザ内へ直接読み込みました。次回訪問時もこのブラウザから自動復元します。"
+        : usesStorageProxy && transport === "proxy"
+          ? "共有セッション指定のSoundFontを一時適用しました。別の曲を読み込むと、保存済みのSoundFontへ戻ります。"
+          : "共有セッション指定のSoundFontを一時適用しました。別の曲を読み込むと、保存済みのSoundFontへ戻ります。");
       setRemoteSoundfontProgress({ loadedBytes: downloadedBytes, totalBytes: downloadedBytes, stage: "ready" });
     } catch (error) {
       setSoundfontName("Remote SoundFont load failed");
@@ -932,10 +1015,66 @@ export default function Home() {
     }
   }
 
+  function sourceKeyForRemote(mdrUrl: string, pdxUrl?: string) {
+    return `remote:${mdrUrl.trim()}|${pdxUrl?.trim() ?? ""}`;
+  }
+
+  async function revertSessionSoundFontIfNeeded() {
+    if (!sessionSoundFontTemporaryRef.current) return;
+    sessionSoundFontTemporaryRef.current = false;
+    sessionInitialSourceKeyRef.current = null;
+    await restorePersistedSoundFont();
+  }
+
+  async function maybeRevertSessionSoundFontBeforeSourceLoad(nextSourceKey?: string) {
+    if (!sessionSoundFontTemporaryRef.current || sessionRestoreSourceLoadingRef.current) return;
+    if (nextSourceKey && sessionInitialSourceKeyRef.current === nextSourceKey) return;
+    await revertSessionSoundFontIfNeeded();
+  }
+
   async function loadDefaultSoundFont() {
     if (remoteSoundfontLoading) return;
     setRemoteSoundfontUrl(generalUserGsPresetUrl);
     await loadRemoteSoundFont(generalUserGsPresetUrl);
+  }
+
+  async function restorePersistedSoundFont() {
+    const saved = readPersistedSoundFontSelection();
+    if (!saved) {
+      await loadDefaultSoundFont();
+      return;
+    }
+    if (saved.kind === "remote") {
+      setRemoteSoundfontUrl(saved.sourceUrl);
+      await loadRemoteSoundFont(saved.sourceUrl);
+      return;
+    }
+    setRemoteSoundfontLoading(true);
+    setSoundfontName("Loading saved SoundFont…");
+    setRemoteSoundfontProgress({ loadedBytes: 0, totalBytes: null, stage: "initializing" });
+    try {
+      const cached = await readCachedLocalSoundFont(saved);
+      if (!cached) {
+        setRemoteSoundfontLoading(false);
+        await loadDefaultSoundFont();
+        return;
+      }
+      await audio().loadSoundFontData(cached);
+      setRemoteSoundfontUrl("");
+      setSoundfontName(saved.name);
+      setSoundFontByteLength(cached.byteLength);
+      activateSoundFontTimingProfile(`local:${saved.name}:${saved.size}:${saved.lastModified}`);
+      setRemoteSoundfontProgress({ loadedBytes: cached.byteLength, totalBytes: cached.byteLength, stage: "ready" });
+      setNotice("前回選択したSoundFontをこのブラウザから復元しました。");
+    } catch (error) {
+      setSoundfontName("SoundFont load failed");
+      setNotice(error instanceof Error ? `保存済みSoundFontを復元できませんでした: ${error.message}` : "保存済みSoundFontを復元できませんでした。デフォルトへ切り替えます。");
+      setRemoteSoundfontProgress(current => current ? { ...current, stage: "failed" } : { loadedBytes: 0, totalBytes: null, stage: "failed" });
+      setRemoteSoundfontLoading(false);
+      await loadDefaultSoundFont();
+    } finally {
+      setRemoteSoundfontLoading(false);
+    }
   }
 
   async function enableExternalMidi() {
@@ -1044,6 +1183,7 @@ export default function Home() {
   }
 
   async function loadRemoteEntry(mdrUrl: string, pdxUrl?: string, label?: string): Promise<{ source: ArrayBuffer; pdx?: ArrayBuffer; format: "mdr" | "mdx"; title: string } | undefined> {
+    await maybeRevertSessionSoundFontBeforeSourceLoad(sourceKeyForRemote(mdrUrl, pdxUrl));
     setRemoteLoading(true);
     setMdrInfo(null);
     setMdrEstimatedDuration(null);
@@ -1292,17 +1432,20 @@ export default function Home() {
         const nextIndex = resolveNextPlaylistIndex(index, playlistEntries.length);
         if (nextIndex !== null) {
           const silenceSeconds = resolvePlaylistInterTrackSilenceSeconds(singleLoopDuration, entryLoopCount);
-          if (silenceSeconds > 0) {
-            setIsPlaying(false);
-            setNotice(`「${entry.title}」を${entryLoopCount}回再生しました。短い曲のため${silenceSeconds.toFixed(1)}秒の無音後に次の曲へ進みます（${nextIndex + 1} / ${playlistEntries.length}）。`);
-            window.setTimeout(() => {
-              if (requestId !== playlistStartRequestRef.current || !playlistRunRef.current) return;
-              void playPlaylistEntry(playlistEntries[nextIndex]!.id);
-            }, silenceSeconds * 1000);
-          } else {
-            setNotice(`「${entry.title}」を${entryLoopCount}回再生しました。次の曲へ進みます（${nextIndex + 1} / ${playlistEntries.length}）。`);
+          const playNext = () => {
+            if (requestId !== playlistStartRequestRef.current || !playlistRunRef.current) return;
             void playPlaylistEntry(playlistEntries[nextIndex]!.id);
-          }
+          };
+          void revertSessionSoundFontIfNeeded().then(() => {
+            if (silenceSeconds > 0) {
+              setIsPlaying(false);
+              setNotice(`「${entry.title}」を${entryLoopCount}回再生しました。短い曲のため${silenceSeconds.toFixed(1)}秒の無音後に次の曲へ進みます（${nextIndex + 1} / ${playlistEntries.length}）。`);
+              window.setTimeout(playNext, silenceSeconds * 1000);
+            } else {
+              setNotice(`「${entry.title}」を${entryLoopCount}回再生しました。次の曲へ進みます（${nextIndex + 1} / ${playlistEntries.length}）。`);
+              playNext();
+            }
+          });
           return;
         }
         playlistRunRef.current = false;
@@ -1315,7 +1458,7 @@ export default function Home() {
       if (requestId !== playlistStartRequestRef.current) return;
       singleLoopDuration = rendered.duration;
       setDuration(rendered.duration);
-      setAudioSampleRate(audio().getSampleRate());
+      refreshAudioClock();
       setIsPlaying(true);
       setNotice(`プレイリスト ${index + 1} / ${playlistEntries.length}「${entry.title}」を${entryLoopCount}回ループで再生中です。`);
     } catch (error) {
@@ -1324,7 +1467,9 @@ export default function Home() {
       const nextIndex = resolveNextPlaylistIndex(index, playlistEntries.length);
       if (playlistRunRef.current && nextIndex !== null) {
         setNotice(`${message} 次の曲へ進みます（${nextIndex + 1} / ${playlistEntries.length}）。`);
-        void playPlaylistEntry(playlistEntries[nextIndex]!.id);
+        void revertSessionSoundFontIfNeeded().then(() => {
+          void playPlaylistEntry(playlistEntries[nextIndex]!.id);
+        });
         return;
       }
       playlistRunRef.current = false;
@@ -1379,7 +1524,7 @@ export default function Home() {
           });
         setDuration(rendered.duration);
         if (source.format === "mdr") setMdrEstimatedDuration(rendered.duration);
-        setAudioSampleRate(audio().getSampleRate());
+        refreshAudioClock();
         setIsPlaying(true);
         setNotice(loopCount === 0 ? `${rendered.format}をWebAssemblyで無限ループ再生中です。停止ボタンで終了します。` : `${rendered.format}をWebAssemblyで再生中です。ループ上限: ${loopCount}回。`);
         return;
@@ -1397,7 +1542,7 @@ export default function Home() {
         setIsPlaying(false);
         setNotice("MMLスコアの再生が終了しました。");
       });
-      setAudioSampleRate(audio().getSampleRate());
+      refreshAudioClock();
       setIsPlaying(true);
       setNotice(`${score.events.length}ノートを${score.engines.map((engine) => engine.toUpperCase()).join(" / ")}経路へ送出しています。`);
     } catch (error) {
@@ -1514,9 +1659,9 @@ export default function Home() {
               <p className="mono m-0 mt-0.5 text-[9px] uppercase tracking-[0.21em] text-[#a9aca2]">Signal Deck / 01</p>
             </div>
           </div>
-          <div className="hidden items-center gap-6 sm:flex">
-            <span className="mono inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-[#a9aca2]"><span className="h-1.5 w-1.5 rounded-full bg-primary" />Browser local</span>
-            <button className="mono flex items-center gap-1.5 text-[10px] uppercase tracking-[0.16em] text-[#d7d9d1] transition-colors hover:text-primary"><Info size={13} />Format guide</button>
+          <div className="flex items-center gap-4 sm:gap-6">
+            <span className="mono hidden items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-[#a9aca2] sm:inline-flex"><span className="h-1.5 w-1.5 rounded-full bg-primary" />Browser local</span>
+            <button type="button" data-testid="format-guide-button" onClick={() => setFormatGuideOpen(true)} className="mono flex items-center gap-1.5 text-[10px] uppercase tracking-[0.16em] text-[#d7d9d1] transition-colors hover:text-primary"><Info size={13} />Format guide</button>
           </div>
         </div>
       </header>
@@ -1645,10 +1790,15 @@ export default function Home() {
                     {midiOutputMode === "soundfont" && <div aria-label="SoundFont MDR遅延補正" data-testid="soundfont-timing-profile" className="mt-3 border border-[#8fa7cc]/40 bg-[#8fa7cc]/[0.05] p-3">
                       <div className="flex items-center justify-between gap-3"><SmallLabel>SoundFont MDR timing correction</SmallLabel><button type="button" onClick={resetSoundFontMdrDelay} className="mono text-[8px] uppercase tracking-[0.08em] text-primary hover:text-[#f5f4ec]">Reset</button></div>
                       <p className="mono mb-0 mt-2 truncate text-[8px] uppercase tracking-[0.08em] text-[#c2d6f4]">{soundFontProfileKey ? `Bank profile · ${soundfontName}` : "Common profile · no SoundFont selected"}</p>
-                      <label className="mt-2 block"><span className="mono text-[9px] text-[#dfe1d8]">発音補正（+ は後ろへ）</span><div className="mt-1 flex items-stretch gap-2"><input aria-label="SoundFont MDR発音補正 ms" type="text" inputMode="text" autoComplete="off" value={soundFontMdrDelayDraft} onChange={(event) => updateSoundFontMdrDelayDraft(event.target.value)} onBlur={commitSoundFontMdrDelayDraft} className="mono min-w-0 flex-1 border border-white/15 bg-[#11120f] px-2.5 py-2 text-[10px] text-[#f5f4ec] outline-none focus:border-primary" /><span className="mono self-center text-[9px] text-[#c2d6f4]">ms</span><span className="grid shrink-0 overflow-hidden border border-white/15 bg-[#11120f]"><button type="button" aria-label="SoundFont MDR発音補正を1 ms増やす" data-testid="soundfont-timing-step-up" onClick={() => stepSoundFontMdrDelay(1)} className="mono grid h-4 w-6 place-items-center border-b border-white/15 text-[9px] leading-none text-[#dfe1d8] transition-colors hover:bg-primary hover:text-primary-foreground active:scale-[0.97]">▲</button><button type="button" aria-label="SoundFont MDR発音補正を1 ms減らす" data-testid="soundfont-timing-step-down" onClick={() => stepSoundFontMdrDelay(-1)} className="mono grid h-4 w-6 place-items-center text-[9px] leading-none text-[#dfe1d8] transition-colors hover:bg-primary hover:text-primary-foreground active:scale-[0.97]">▼</button></span></div></label>
+                      <dl className="mt-3 grid gap-2 border-y border-white/10 py-3 text-[9px] sm:grid-cols-2">
+                        <div><dt className="mono uppercase tracking-[0.1em] text-[#8b9085]">推奨</dt><dd data-testid="soundfont-timing-recommended" className="mono m-0 mt-1 text-[#f5f4ec]">{soundFontMdrDelayRecommendation.totalMs >= 0 ? "+" : ""}{soundFontMdrDelayRecommendation.totalMs} ms</dd><dd className="mono m-0 mt-1 text-[8px] leading-4 text-[#72776d]">{soundFontMdrDelayRecommendation.reason}</dd></div>
+                        <div><dt className="mono uppercase tracking-[0.1em] text-[#8b9085]">実測</dt><dd data-testid="soundfont-timing-measured" className="mono m-0 mt-1 text-[#f5f4ec]">{soundFontMdrDelayMeasurement ? `${soundFontMdrDelayMeasurement.suggestedTotalMs >= 0 ? "+" : ""}${Math.round(soundFontMdrDelayMeasurement.suggestedTotalMs)} ms` : isPlaying && mdrInfo?.hardwareTracks ? "計測中…" : "—"}</dd><dd className="mono m-0 mt-1 text-[8px] leading-4 text-[#72776d]">{soundFontMdrDelayMeasurement ? `残差 ${soundFontMdrDelayMeasurement.residualMs >= 0 ? "+" : ""}${Math.round(soundFontMdrDelayMeasurement.residualMs)} ms · ${soundFontMdrDelayMeasurement.sampleCount} samples` : "MDR再生中に MXDRV クロックで推定"}</dd></div>
+                      </dl>
+                      <div className="mt-2 flex flex-wrap gap-2"><button type="button" data-testid="soundfont-timing-apply-recommended" onClick={() => changeSoundFontMdrDelay(soundFontMdrDelayRecommendation.totalMs)} className="mono border border-white/20 px-2.5 py-2 text-[8px] uppercase tracking-[0.08em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary">推奨を適用</button>{soundFontMdrDelayMeasurement && <button type="button" data-testid="soundfont-timing-apply-measured" onClick={() => changeSoundFontMdrDelay(Math.round(soundFontMdrDelayMeasurement.suggestedTotalMs))} className="mono border border-[#8fa7cc]/45 px-2.5 py-2 text-[8px] uppercase tracking-[0.08em] text-[#c2d6f4] transition-colors hover:border-primary hover:text-primary">実測を適用</button>}</div>
+                      <label className="mt-2 block"><span className="mono text-[9px] text-[#dfe1d8]">発音補正（OPMが遅いときは + を増やす）</span><div className="mt-1 flex items-stretch gap-2"><input aria-label="SoundFont MDR発音補正 ms" type="text" inputMode="text" autoComplete="off" value={soundFontMdrDelayDraft} onChange={(event) => updateSoundFontMdrDelayDraft(event.target.value)} onBlur={commitSoundFontMdrDelayDraft} className="mono min-w-0 flex-1 border border-white/15 bg-[#11120f] px-2.5 py-2 text-[10px] text-[#f5f4ec] outline-none focus:border-primary" /><span className="mono self-center text-[9px] text-[#c2d6f4]">ms</span><span className="grid shrink-0 overflow-hidden border border-white/15 bg-[#11120f]"><button type="button" aria-label="SoundFont MDR発音補正を1 ms増やす" data-testid="soundfont-timing-step-up" onClick={() => stepSoundFontMdrDelay(1)} className="mono grid h-4 w-6 place-items-center border-b border-white/15 text-[9px] leading-none text-[#dfe1d8] transition-colors hover:bg-primary hover:text-primary-foreground active:scale-[0.97]">▲</button><button type="button" aria-label="SoundFont MDR発音補正を1 ms減らす" data-testid="soundfont-timing-step-down" onClick={() => stepSoundFontMdrDelay(-1)} className="mono grid h-4 w-6 place-items-center text-[9px] leading-none text-[#dfe1d8] transition-colors hover:bg-primary hover:text-primary-foreground active:scale-[0.97]">▼</button></span></div></label>
                       <div aria-label="SoundFont補正A/B試聴" data-testid="soundfont-ab-preview" data-active-delay-ms={String(activeSoundFontMdrDelayMs)} className="mt-3 grid grid-cols-2 gap-1.5"><button type="button" aria-pressed={soundFontTimingComparisonMode === "corrected"} onClick={() => setSoundFontTimingComparisonMode("corrected")} className={`mono border px-2 py-2 text-[8px] uppercase tracking-[0.06em] transition-colors ${soundFontTimingComparisonMode === "corrected" ? "border-primary bg-primary text-primary-foreground" : "border-white/20 text-[#dfe1d8] hover:border-primary hover:text-primary"}`}>A · 補正あり {soundFontMdrDelayMs >= 0 ? "+" : ""}{soundFontMdrDelayMs} ms</button><button type="button" aria-pressed={soundFontTimingComparisonMode === "uncompensated"} onClick={() => setSoundFontTimingComparisonMode("uncompensated")} className={`mono border px-2 py-2 text-[8px] uppercase tracking-[0.06em] transition-colors ${soundFontTimingComparisonMode === "uncompensated" ? "border-[#c2d6f4] bg-[#8fa7cc]/20 text-[#dbe9ff]" : "border-white/20 text-[#dfe1d8] hover:border-[#c2d6f4] hover:text-[#dbe9ff]"}`}>B · 補正なし 0 ms</button></div>
                       <p className="mono mb-0 mt-2 text-[8px] leading-4 text-[#8b9085]">A/B試聴は保存値を変更しません。再生中でも切り替えられ、先行スケジュール済みのMIDIを除く次のイベントから反映されます。</p>
-                      <p className="mono mb-0 mt-2 text-[8px] leading-4 text-[#8b9085]">-100〜+100 ms。負数は「-」からそのまま入力でき、矢印キーではカレットだけを移動します。入力欄の右にある▲/▼ボタンは1 msずつ増減します。読込済みSoundFontでは音源ごとの補正として自動保存・復元します。未選択時は従来の共通補正です。MDRの内蔵SoundFontだけに適用し、OPM／PCM・MML・外部MIDIには影響しません。</p>
+                      <p className="mono mb-0 mt-2 text-[8px] leading-4 text-[#8b9085]">-350〜+350 ms。推奨は端末の音声バッファ・出力遅延・再生プロファイルから算出します。実測は OPM/PCM と GS MIDI の MXDRV クロック差分です。OPM／PCMが遅れて聞こえるときは + を増やして GS MIDI を後ろへずらします。読込済みSoundFontでは音源ごとに自動保存・復元します。</p>
                     </div>}
                     {midiOutputMode === "hardware" && <select value={selectedMidiDevice} onChange={(event) => changeMidiDevice(event.target.value)} className="mono mt-3 w-full border border-white/15 bg-[#11120f] px-3 py-3 text-[10px] text-[#f5f4ec] outline-none focus:border-primary"><option value="" disabled>出力機器を選択</option>{midiDevices.map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}</select>}
                     {midiOutputMode === "hardware" && <div aria-label="外部MIDI遅延補正" className="mt-3 border border-primary/30 bg-primary/[0.04] p-3"><div className="flex items-center justify-between gap-3"><SmallLabel>External MIDI timing correction</SmallLabel><button type="button" onClick={() => changeExternalMidiAdvance(0)} className="mono text-[8px] uppercase tracking-[0.08em] text-primary hover:text-[#f5f4ec]">Reset</button></div><label className="mt-2 block"><span className="mono text-[9px] text-[#dfe1d8]">送出補正（+ は前倒し）</span><div className="mt-1 flex items-center gap-2"><input aria-label="外部MIDI送出補正 ms" type="text" inputMode="text" autoComplete="off" value={externalMidiAdvanceDraft} onChange={(event) => updateExternalMidiAdvanceDraft(event.target.value)} onBlur={commitExternalMidiAdvanceDraft} className="mono min-w-0 flex-1 border border-white/15 bg-[#11120f] px-2.5 py-2 text-[10px] text-[#f5f4ec] outline-none focus:border-primary" /><span className="mono text-[9px] text-primary">ms</span></div></label><p className="mono mb-0 mt-2 text-[8px] leading-4 text-[#8b9085]">-250〜+250 ms。負数は「-」からそのまま入力でき、矢印キーではカレットだけを移動します。外部MIDIだけに適用し、このブラウザに保存します。SoundFont／OPM／PCMには影響しません。</p></div>}
@@ -1788,6 +1938,7 @@ export default function Home() {
           <p className="mono m-0 text-[10px] uppercase tracking-[0.17em] text-[#72776d]">MADRV Player / Signal Deck</p>
         </div>
       </footer>
+      <FormatGuideDialog open={formatGuideOpen} onOpenChange={setFormatGuideOpen} />
     </div>
   );
 }

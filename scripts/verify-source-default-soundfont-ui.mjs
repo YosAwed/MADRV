@@ -11,7 +11,6 @@ try {
   await page.getByText("MDR / MDX / PDXを置く", { exact: true }).waitFor({ state: "visible" });
   await page.getByRole("button", { name: "MML SCORE" }).click();
   await page.getByLabel("MMLを入力").waitFor({ state: "visible" });
-  await page.getByRole("button", { name: /Load default SoundFont/ }).click();
   await page.getByTestId("remote-soundfont-progress").getByText("SoundFont ready").waitFor({ state: "visible", timeout: 180_000 });
   const remoteUrl = await page.locator('input[placeholder*="example.org/gs.sf2"]').inputValue();
   if (!remoteUrl.includes("GeneralUser%20GS%20v1.471.sf2")) throw new Error(`Default SoundFont URL was not applied: ${remoteUrl}`);

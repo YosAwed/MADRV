@@ -37,7 +37,7 @@ try {
     await page.getByRole("button", { name: "MML SCORE" }).click();
     await page.getByRole("button", { name: /LOAD TEST PRESET/i }).click();
     await page.getByRole("button", { name: "Load", exact: true }).click();
-    await requireVisible(page.getByText("CORS対応SoundFontをブラウザ内へ読み込みました。MDRとMMLのGS MIDIトラックに使用します。"), `${scenario.name} remote SoundFont`);
+    await requireVisible(page.getByText("CORS対応SoundFontをブラウザ内へ直接読み込みました。次回訪問時もこのブラウザから自動復元します。"), `${scenario.name} remote SoundFont`);
     await page.screenshot({ path: `/home/ubuntu/madrv-player-web/test-artifacts/${scenario.name}-responsive-flow.png`, fullPage: true });
     await page.close();
     console.log(`${scenario.name}: passed`);

@@ -166,10 +166,13 @@ export function normalizeExternalMidiAdvanceMs(value: number): number {
   return Math.max(-250, Math.min(250, Math.round(value)));
 }
 
+/** Maximum user-facing SoundFont delay when OPM/PCM audibly leads GS MIDI on a device. */
+export const MADRV_SOUND_FONT_MDR_DELAY_MS_LIMIT = 350;
+
 /** Positive values postpone the browser SoundFont without affecting OPM, PCM, or external MIDI. */
 export function normalizeSoundFontMdrDelayMs(value: number): number {
   if (!Number.isFinite(value)) return 0;
-  return Math.max(-100, Math.min(100, Math.round(value)));
+  return Math.max(-MADRV_SOUND_FONT_MDR_DELAY_MS_LIMIT, Math.min(MADRV_SOUND_FONT_MDR_DELAY_MS_LIMIT, Math.round(value)));
 }
 
 /** Applies one mouse-button step while preserving the SoundFont correction range. */
@@ -217,6 +220,92 @@ export function resolveSoundFontMdrTimingComparisonDelay(delayMs: number, mode: 
 
 export function resolveSoundFontMdrScheduleAtSeconds(scheduleAt: number, delayMs: number): number {
   return scheduleAt + normalizeSoundFontMdrDelayMs(delayMs) / 1000;
+}
+
+/** Applies SoundFont MDR correction on the MXDRV song timeline so tempo changes do not skew the offset. */
+export function resolveSoundFontMdrDispatchAtSeconds(eventAtSeconds: number, delayMs: number): number {
+  if (!Number.isFinite(eventAtSeconds)) return 0;
+  return Math.max(0, eventAtSeconds + normalizeSoundFontMdrDelayMs(delayMs) / 1000);
+}
+
+export type SoundFontMdrDelayRecommendation = {
+  totalMs: number;
+  rendererMs: number;
+  outputMs: number;
+  lookaheadMs: number;
+  synthMs: number;
+  reason: string;
+};
+
+/** Estimates a browser-local SoundFont MDR correction from the active audio path and playback profile. */
+export function recommendSoundFontMdrDelayMs(input: {
+  profile: PlaybackPerformanceProfile;
+  sampleRate: number;
+  outputLatencySeconds?: number;
+  baseLatencySeconds?: number;
+  frameP95Ms?: number;
+}): SoundFontMdrDelayRecommendation {
+  const rendererMs = resolveMdrRendererLatencySeconds(input.profile, input.sampleRate) * 1000;
+  const outputMs = Math.max(0, (input.outputLatencySeconds ?? 0) * 1000);
+  const baseMs = Math.max(0, (input.baseLatencySeconds ?? 0) * 1000);
+  const lookaheadMs = resolveMdrMidiLookaheadSeconds(input.profile) * 1000;
+  const synthMs = input.profile === "mobile" ? 35 : 20;
+  const framePenalty = input.frameP95Ms !== undefined && input.frameP95Ms > 25
+    ? Math.round((input.frameP95Ms - 25) * 0.8)
+    : 0;
+  const rawMs = rendererMs + outputMs + baseMs + synthMs + framePenalty - lookaheadMs;
+  const totalMs = normalizeSoundFontMdrDelayMs(Math.round(rawMs));
+  return {
+    totalMs,
+    rendererMs: Math.round(rendererMs),
+    outputMs: Math.round(outputMs + baseMs),
+    lookaheadMs: Math.round(lookaheadMs),
+    synthMs,
+    reason: `OPM ${Math.round(rendererMs)} ms + 出力 ${Math.round(outputMs + baseMs)} ms + SF ${synthMs} ms − 先行 ${Math.round(lookaheadMs)} ms${framePenalty ? ` + UI ${framePenalty} ms` : ""}`,
+  };
+}
+
+/** Residual OPM-vs-GS skew on the MXDRV song clock; positive means GS MIDI is audibly early. */
+export function resolveSoundFontMdrSyncResidualMs(snapshot: MdrMidiSyncSnapshot | null | undefined): number | null {
+  if (!snapshot || snapshot.hardwareMilliseconds === null) return null;
+  return snapshot.hardwareMilliseconds - snapshot.scheduledSeconds * 1000;
+}
+
+export type SoundFontMdrDelayMeasurement = {
+  residualMs: number;
+  suggestedTotalMs: number;
+  sampleCount: number;
+};
+
+/** Smooths live sync residuals into a suggested total correction while MDR hybrid playback is running. */
+export function updateSoundFontMdrDelayMeasurement(
+  previous: SoundFontMdrDelayMeasurement | null,
+  snapshot: MdrMidiSyncSnapshot | null | undefined,
+  currentCorrectionMs: number,
+): SoundFontMdrDelayMeasurement | null {
+  const residualMs = resolveSoundFontMdrSyncResidualMs(snapshot);
+  if (residualMs === null) return previous;
+  const suggestedTotalMs = normalizeSoundFontMdrDelayMs(Math.round(residualMs + currentCorrectionMs));
+  if (!previous) return { residualMs, suggestedTotalMs, sampleCount: 1 };
+  const alpha = 0.18;
+  const smoothedResidualMs = previous.residualMs * (1 - alpha) + residualMs * alpha;
+  return {
+    residualMs: smoothedResidualMs,
+    suggestedTotalMs: normalizeSoundFontMdrDelayMs(Math.round(smoothedResidualMs + currentCorrectionMs)),
+    sampleCount: previous.sampleCount + 1,
+  };
+}
+
+/** Hybrid OPM/PCM playback ends on MXDRV termination; GS-only MDR ends when its MIDI timeline is exhausted. */
+export function shouldEndFiniteMdrPlayback(needsHardwareRenderer: boolean, hardwareTerminated: boolean, midiTimelineComplete: boolean): boolean {
+  if (needsHardwareRenderer) return hardwareTerminated;
+  return midiTimelineComplete;
+}
+
+/** Wall-clock failsafe for hybrid playback when termination detection stalls under main-thread pressure. */
+export function resolveMdrPlaybackFailsafeSeconds(totalPlaybackDuration: number): number {
+  const safeDuration = Number.isFinite(totalPlaybackDuration) && totalPlaybackDuration > 0 ? totalPlaybackDuration : 0;
+  return Math.max(safeDuration * 1.25 + 30, safeDuration + 10, 60);
 }
 
 /** A queued SoundFont event is valid only for its original playback generation and a loaded synth. */
@@ -280,6 +369,18 @@ export function requiresStableMadrvProfileForSoundFont(byteLength: number): bool
 export function resolveMdrRendererLatencySeconds(profile: PlaybackPerformanceProfile, sampleRate: number): number {
   const safeSampleRate = resolvePlaybackSampleRate(sampleRate);
   return resolveScriptProcessorBufferSize(profile) / safeSampleRate;
+}
+
+/** Audible OPM/PCM starts after the render buffer plus the device output path. */
+export function resolveMdrPlaybackStartLatencySeconds(
+  profile: PlaybackPerformanceProfile,
+  sampleRate: number,
+  outputLatencySeconds = 0,
+  baseLatencySeconds = 0,
+): number {
+  const safeOutputLatency = Number.isFinite(outputLatencySeconds) && outputLatencySeconds > 0 ? outputLatencySeconds : 0;
+  const safeBaseLatency = Number.isFinite(baseLatencySeconds) && baseLatencySeconds > 0 ? baseLatencySeconds : 0;
+  return Math.max(0.025, safeBaseLatency) + resolveMdrRendererLatencySeconds(profile, sampleRate) + safeOutputLatency;
 }
 
 /** Caps React transport updates while keeping the marker responsive on constrained mobile CPUs. */
@@ -513,10 +614,14 @@ export function mxdrvRawNoteToPitchClass(rawNote: number): number | null {
   return midiNote === null ? null : midiNote % 12;
 }
 
-/** Converts MXDRV's shifted note value into a MIDI note number (C-1 = 0). */
+/**
+ * Converts MXDRV's shifted note value into a MIDI note number (C-1 = 0).
+ * MDX note 0 is MML o0d♯ (not C), so MIDI = floor(raw/64) + 3.
+ * @see https://github.com/vampirefrog/mdxtools/blob/master/docs/MDX.md
+ */
 export function mxdrvRawNoteToMidiNote(rawNote: number): number | null {
   if (!Number.isFinite(rawNote) || rawNote < 0) return null;
-  const midiNote = Math.floor(rawNote / 64);
+  const midiNote = Math.floor(rawNote / 64) + 3;
   if (midiNote < 0 || midiNote > 127) return null;
   return midiNote;
 }
@@ -1661,6 +1766,15 @@ export class SignalDeckAudio {
     return this.graph.context.sampleRate;
   }
 
+  getAudioLatencyInfo(): { sampleRate: number; outputLatencySeconds: number; baseLatencySeconds: number } {
+    const { context } = this.graph;
+    return {
+      sampleRate: context.sampleRate,
+      outputLatencySeconds: Number.isFinite(context.outputLatency) ? context.outputLatency : 0,
+      baseLatencySeconds: Number.isFinite(context.baseLatency) ? context.baseLatency : 0,
+    };
+  }
+
   setPerformanceProfile(profile: PlaybackPerformanceProfile, safariCompatibilityMode = false) {
     this.performanceProfile = profile;
     this.safariCompatibilityMode = safariCompatibilityMode;
@@ -2073,7 +2187,7 @@ export class SignalDeckAudio {
       this.sendHardware(bytes, `MDR MIDI Track ${sourceTrack + 1}${correction ? ` · ${correction > 0 ? "advance" : "delay"} ${Math.abs(correction)} ms` : ""}`, timestamp);
       return;
     }
-    const options = scheduleAt === undefined ? undefined : { time: resolveSoundFontMdrScheduleAtSeconds(scheduleAt, this.soundFontMdrDelayMs) };
+    const options = scheduleAt === undefined ? undefined : { time: scheduleAt };
     const status = bytes[0] & 0xf0;
     const channel = bytes[0] & 0x0f;
     if (status === 0x90 && bytes.length >= 3) {
@@ -2092,7 +2206,7 @@ export class SignalDeckAudio {
 
   private queueSoundFontMdrMidi(bytes: number[], sourceTrack: number, targetAt: number, playbackGeneration: number, scheduleInWorklet = false) {
     const { context } = this.graph;
-    const scheduledAt = resolveSoundFontMdrScheduleAtSeconds(targetAt, this.soundFontMdrDelayMs);
+    const scheduledAt = targetAt;
     const delayMs = Math.max(0, (scheduledAt - context.currentTime) * 1000);
     let timer: number | undefined;
     // Loop-start controllers and first notes are sent to SpessaSynth with an
@@ -2174,7 +2288,9 @@ export class SignalDeckAudio {
         const event = timelineEvents[cursor++]!;
         const eventAt = safeLoopWindow ? resolveMdrMidiLoopDispatchAtSeconds(event.at, cycle, safeLoopWindow) : event.at;
         if (eventAt === undefined) continue;
-        mostRecentDispatchAt = resolveExternalMidiDispatchAtSeconds(eventAt, this.externalMidiAdvanceMs, hardwareOutput);
+        mostRecentDispatchAt = hardwareOutput
+          ? resolveExternalMidiDispatchAtSeconds(eventAt, this.externalMidiAdvanceMs, hardwareOutput)
+          : resolveSoundFontMdrDispatchAtSeconds(eventAt, this.soundFontMdrDelayMs);
         if (mostRecentDispatchAt > hardwareElapsed + lookaheadSeconds) {
           cursor -= 1;
           break;
@@ -2341,9 +2457,12 @@ export class SignalDeckAudio {
       this.reportTimerB(resolveMdrDisplayTempoTimerB(mdr));
       this.reportHardwarePlaybackPosition(null);
     }
-    // ScriptProcessor output is audible after its buffer latency. Dispatch t=0 GS MIDI
-    // on that same audible edge so key-on is not immediately hidden by a matching note-off.
-    const startsAt = context.currentTime + (needsHardwareRenderer ? Math.max(0.025, context.baseLatency || 0) + resolveMdrRendererLatencySeconds(this.performanceProfile, context.sampleRate) : 0.025);
+    // ScriptProcessor output is audible after its buffer latency and the device
+    // output path. Dispatch t=0 GS MIDI on that same audible edge so key-on is
+    // not immediately hidden by a matching note-off.
+    const startsAt = context.currentTime + (needsHardwareRenderer
+      ? resolveMdrPlaybackStartLatencySeconds(this.performanceProfile, context.sampleRate, context.outputLatency, context.baseLatency)
+      : 0.025);
     const hardwareCycleSeconds = needsHardwareRenderer && loops <= 0
       ? resolveMdrHardwareLoopCycleSeconds(info.duration, this.mdrPlayer!.measureDuration(2))
       : undefined;
@@ -2361,10 +2480,13 @@ export class SignalDeckAudio {
     let frame = 0;
     const animate = () => {
       if (!isCurrentPlaybackGeneration(playbackGeneration, this.playbackGeneration)) return;
-      const elapsed = Math.max(0, context.currentTime - startsAt);
+      const hardwareMilliseconds = needsHardwareRenderer ? this.mdrPlayer?.getPlayAtMilliseconds() ?? null : null;
+      const elapsed = hardwareMilliseconds !== null && Number.isFinite(hardwareMilliseconds)
+        ? Math.max(0, hardwareMilliseconds / 1000)
+        : Math.max(0, context.currentTime - startsAt);
       const displayedElapsed = songInfo.duration > 0 && loops !== 1 ? elapsed % songInfo.duration : Math.min(songInfo.duration, elapsed);
       this.publishProgress(onProgress, displayedElapsed);
-      if (loops > 0 && (!needsHardwareRenderer || this.mdrPlayer?.isTerminated()) && this.mdrMidiTimelineComplete) {
+      if (loops > 0 && shouldEndFiniteMdrPlayback(needsHardwareRenderer, this.mdrPlayer?.isTerminated() ?? false, this.mdrMidiTimelineComplete)) {
         this.stop();
         this.publishProgress(onProgress, songInfo.duration, true);
         onEnd();
@@ -2377,13 +2499,19 @@ export class SignalDeckAudio {
     // longer useful for a browser transport. The duration has already been
     // extended through the final GS MIDI event, so it is a finite, user-visible
     // loop bound rather than the old hardware-only early-stop estimate.
-    if (loops > 0) this.endTimer = window.setTimeout(() => {
-      if (!isCurrentPlaybackGeneration(playbackGeneration, this.playbackGeneration)) return;
-      cancelAnimationFrame(frame);
-      this.stop();
-      this.publishProgress(onProgress, songInfo.duration, true);
-      onEnd();
-    }, (totalPlaybackDuration + 0.12) * 1000);
+    if (loops > 0) {
+      const endDelaySeconds = needsHardwareRenderer
+        ? resolveMdrPlaybackFailsafeSeconds(totalPlaybackDuration)
+        : totalPlaybackDuration + 0.12;
+      this.endTimer = window.setTimeout(() => {
+        if (!isCurrentPlaybackGeneration(playbackGeneration, this.playbackGeneration)) return;
+        if (needsHardwareRenderer && !this.mdrPlayer?.isTerminated()) return;
+        cancelAnimationFrame(frame);
+        this.stop();
+        this.publishProgress(onProgress, songInfo.duration, true);
+        onEnd();
+      }, endDelaySeconds * 1000);
+    }
     return songInfo;
   }
 
