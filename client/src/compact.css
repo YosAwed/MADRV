@@ -200,7 +200,7 @@
   min-width: 0;
 }
 .compact-dropzone {
-  min-height: 76px;
+  min-height: 56px;
   padding: 10px;
 }
 .compact-dropzone > div {
@@ -211,7 +211,6 @@
   width: 100%;
 }
 .compact-dropzone > div > div {
-  grid-row: span 2;
   width: 32px;
   height: 32px;
 }
@@ -222,11 +221,6 @@
 }
 .compact-dropzone p:first-of-type {
   font-size: 14px;
-}
-.compact-dropzone p:last-of-type {
-  width: 100%;
-  max-width: none;
-  font-size: 11px;
 }
 .compact-deck textarea {
   min-height: 120px;
@@ -244,7 +238,13 @@
   letter-spacing: 0.03em;
 }
 .compact-deck [data-testid="soundfont-bank-button"] {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
   padding: 8px;
+}
+.compact-deck [data-testid="soundfont-bank-button"] svg {
+  flex-shrink: 0;
 }
 .compact-deck [data-testid="soundfont-bank-button"] span {
   max-width: none;

@@ -1,0 +1,151 @@
+{
+  "localTooltip": {
+    "baseUrl": "http://127.0.0.1:4173",
+    "checks": [
+      {
+        "touch": false,
+        "helpers": 17,
+        "tooltipBounds": {
+          "x": 574,
+          "y": 297,
+          "width": 416,
+          "height": 109.5
+        },
+        "defaultHidden": true,
+        "layoutStable": true,
+        "noticesVisible": true
+      },
+      {
+        "touch": true,
+        "helpers": 17,
+        "tooltipBounds": {
+          "x": 12,
+          "y": 638,
+          "width": 366,
+          "height": 129
+        },
+        "defaultHidden": true,
+        "layoutStable": true,
+        "noticesVisible": true
+      }
+    ],
+    "errors": []
+  },
+  "productionTooltip": {
+    "baseUrl": "https://madrv-player.madrv-player-web.workers.dev",
+    "checks": [
+      {
+        "touch": false,
+        "helpers": 17,
+        "tooltipBounds": {
+          "x": 574,
+          "y": 289,
+          "width": 416,
+          "height": 109.5
+        },
+        "defaultHidden": true,
+        "layoutStable": true,
+        "noticesVisible": true
+      },
+      {
+        "touch": true,
+        "helpers": 17,
+        "tooltipBounds": {
+          "x": 12,
+          "y": 610,
+          "width": 366,
+          "height": 129
+        },
+        "defaultHidden": true,
+        "layoutStable": true,
+        "noticesVisible": true
+      }
+    ],
+    "errors": []
+  },
+  "layoutPlayback": {
+    "baseUrl": "http://127.0.0.1:4173",
+    "viewports": [
+      {
+        "width": 1366,
+        "height": 768,
+        "scrollHeight": 768,
+        "scrollWidth": 1366,
+        "transportBottom": 219.6875,
+        "mainBottom": 717.6875
+      },
+      {
+        "width": 1440,
+        "height": 900,
+        "scrollHeight": 900,
+        "scrollWidth": 1440,
+        "transportBottom": 219.6875,
+        "mainBottom": 717.6875
+      },
+      {
+        "width": 1920,
+        "height": 1080,
+        "scrollHeight": 1080,
+        "scrollWidth": 1920,
+        "transportBottom": 219.6875,
+        "mainBottom": 673.6875
+      },
+      {
+        "width": 960,
+        "height": 740,
+        "scrollHeight": 932,
+        "scrollWidth": 960,
+        "transportBottom": 237.078125,
+        "mainBottom": 931.578125
+      },
+      {
+        "width": 390,
+        "height": 844,
+        "scrollHeight": 1511,
+        "scrollWidth": 390,
+        "transportBottom": 304.46875,
+        "mainBottom": 1510.96875
+      }
+    ],
+    "checks": [
+      "MML retained across unmount; keyboard Enter toggles panel",
+      "Open and closed states restored on reload",
+      "Missing MIDI bank reveals and focuses a persisted closed SoundFont panel",
+      "30-track hardware + built-in MIDI playback; folding source/SoundFont/matrix during playback; stop",
+      "Expanded 13 panels; playlist add, remote inputs/catalog, MML and format guide accessible"
+    ],
+    "audio": {
+      "callbacks": 12,
+      "peak": 0.144866943359375
+    },
+    "errors": []
+  },
+  "advisorPlayback": {
+    "root": "/Users/awed/MADRVWEB/dist/public",
+    "source": "/Users/awed/MDRSAMPLE/MJ_RUMI_SC.MDR",
+    "rate": 1,
+    "durationMs": 3000,
+    "preset": "auto",
+    "loaded": "あにま～じゃんV3(C)SOGNA - Message From RUMI - Feat.くりんぱ / AVG-FOE.を読込みました。OPM／PDX 15トラック、GS MIDI 15トラックを検出。 PDXペアを使用できます。",
+    "notice": "プレイリスト 1 / 1「あにま～じゃんV3(C)SOGNA - Message From RUMI - Feat.くりんぱ / AVG-FOE.」を2回ループで再生中です。",
+    "advisor": "Playback advisor推奨: 安定優先 / 負荷 58 / 100auto · 安定優先Asset0.04 MiBProbe0.2 msFrame p9511.9 ms推奨を適用低遅延標準安定優先",
+    "advisorChecks": {
+      "destinationSwitch": true,
+      "playlistBuffer": 16384,
+      "manualBuffer": 2048
+    },
+    "callbacks": 9,
+    "bufferBudgetMs": 341.3333333333333,
+    "callbackGapP95Ms": 341.5,
+    "callbackGapMaxMs": 341.5,
+    "callbackRenderP95Ms": 11.199999988079071,
+    "lateCallbacks": 0,
+    "longTasks": 0,
+    "longTaskTotalMs": 0,
+    "mutations": 1158,
+    "peak": 0.134796142578125,
+    "warnings": [],
+    "errors": []
+  },
+  "version": "43567eef-a091-433d-b97b-dbaf4826e73f"
+}

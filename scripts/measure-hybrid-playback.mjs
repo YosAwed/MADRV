@@ -181,26 +181,46 @@ try {
       });
     });
     const denseReason = "OPM／PCMと内蔵SoundFontの多数トラック";
+    const verifyDenseReason = async expected => {
+      const help = page
+        .getByTestId("playback-advisor")
+        .getByRole("button", { name: "Playback advisorの説明", exact: true });
+      // Older comparison builds render the reason inline; compact builds show
+      // the same diagnosis through the advisor's accessible help control.
+      const usesTooltip = (await help.count()) > 0;
+      if (usesTooltip) {
+        await help.click();
+        await page.getByRole("tooltip").waitFor();
+      }
+      await page.waitForFunction(
+        ({ selector, reason, expected }) => {
+          const explanation = document.querySelector(selector);
+          return (
+            explanation !== null &&
+            explanation.textContent.includes(reason) === expected
+          );
+        },
+        {
+          selector: usesTooltip
+            ? '[role="tooltip"]'
+            : '[data-testid="playback-advisor"]',
+          reason: denseReason,
+          expected,
+        }
+      );
+      if (usesTooltip) {
+        await page.keyboard.press("Escape");
+        await page.getByRole("tooltip").waitFor({ state: "hidden" });
+      }
+    };
     await openPanel("playlist");
-    await page
-      .getByTestId("playback-advisor")
-      .filter({ hasText: denseReason })
-      .waitFor();
+    await verifyDenseReason(true);
     await page
       .getByRole("button", { name: "External MIDI", exact: true })
       .click();
-    await page.waitForFunction(
-      reason =>
-        !document
-          .querySelector('[data-testid="playback-advisor"]')
-          ?.textContent.includes(reason),
-      denseReason
-    );
+    await verifyDenseReason(false);
     await page.getByRole("button", { name: "SoundFont", exact: true }).click();
-    await page
-      .getByTestId("playback-advisor")
-      .filter({ hasText: denseReason })
-      .waitFor();
+    await verifyDenseReason(true);
     await page
       .getByRole("button", { name: "Add current", exact: true })
       .click();
