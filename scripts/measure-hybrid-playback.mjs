@@ -157,8 +157,18 @@ try {
     .waitFor();
   const loaded = await page.getByTestId("playback-notice").textContent();
   console.log(loaded);
+  // New builds fold optional controls; older baseline builds have no toggles.
+  const openPanel = async id => {
+    const toggle = page.getByTestId(`panel-toggle-${id}`);
+    if (
+      (await toggle.count()) &&
+      (await toggle.getAttribute("aria-expanded")) !== "true"
+    )
+      await toggle.click();
+  };
   const verifyAdvisor = process.env.VERIFY_ADVISOR === "1";
   if (verifyAdvisor) {
+    await openPanel("advisor");
     // Mock device enumeration only: no real external MIDI device is exercised.
     await page.evaluate(() => {
       navigator.requestMIDIAccess = async () => ({
@@ -171,6 +181,7 @@ try {
       });
     });
     const denseReason = "OPM／PCMと内蔵SoundFontの多数トラック";
+    await openPanel("playlist");
     await page
       .getByTestId("playback-advisor")
       .filter({ hasText: denseReason })
@@ -231,6 +242,7 @@ try {
     return window.__hybrid;
   });
   const notice = await page.getByTestId("playback-notice").textContent();
+  await openPanel("advisor");
   const advisor = await page.getByTestId("playback-advisor").textContent();
   await page.getByRole("button", { name: "停止", exact: true }).first().click();
   let advisorChecks;

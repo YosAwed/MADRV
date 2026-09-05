@@ -1,0 +1,57 @@
+{
+  "baseUrl": "https://madrv-player.madrv-player-web.workers.dev",
+  "viewports": [
+    {
+      "width": 1366,
+      "height": 768,
+      "scrollHeight": 768,
+      "scrollWidth": 1366,
+      "transportBottom": 219.6875,
+      "mainBottom": 717.6875
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "transportBottom": 219.6875,
+      "mainBottom": 717.6875
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "scrollHeight": 1080,
+      "scrollWidth": 1920,
+      "transportBottom": 219.6875,
+      "mainBottom": 673.6875
+    },
+    {
+      "width": 960,
+      "height": 740,
+      "scrollHeight": 974,
+      "scrollWidth": 960,
+      "transportBottom": 237.078125,
+      "mainBottom": 973.578125
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "scrollHeight": 1615,
+      "scrollWidth": 390,
+      "transportBottom": 304.46875,
+      "mainBottom": 1614.96875
+    }
+  ],
+  "checks": [
+    "MML retained across unmount; keyboard Enter toggles panel",
+    "Open and closed states restored on reload",
+    "Missing MIDI bank reveals and focuses a persisted closed SoundFont panel",
+    "30-track hardware + built-in MIDI playback; folding source/SoundFont/matrix during playback; stop",
+    "Expanded 13 panels; playlist add, remote inputs/catalog, MML and format guide accessible"
+  ],
+  "audio": {
+    "callbacks": 12,
+    "peak": 0.144866943359375
+  },
+  "errors": []
+}
