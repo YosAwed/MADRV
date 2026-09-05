@@ -189,6 +189,16 @@ try {
   );
 
   await close("soundfont");
+  const headerBank = page
+    .locator("header")
+    .getByTestId("soundfont-bank-button");
+  await assertInViewport(headerBank, "Header bank with output settings folded");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await assertInViewport(headerBank, "Mobile header bank");
+  await page.setViewportSize({ width: 1366, height: 768 });
+  report.checks.push(
+    "Bank picker remains in the top header on desktop/mobile even when output settings are folded"
+  );
   await page.getByRole("button", { name: "MML SCORE", exact: true }).click();
   await page.getByLabel("MMLを入力").fill("@MIDI T120 O4 C4");
   await page.getByRole("button", { name: "再生", exact: true }).click();
@@ -249,7 +259,9 @@ try {
         .getBoundingClientRect().top,
     }));
     if (measured.diagnosticsTop < measured.mainBottom - 1)
-      throw new Error("Debug diagnostics are not below the main operating area.");
+      throw new Error(
+        "Debug diagnostics are not below the main operating area."
+      );
     if (measured.scrollWidth > width + 1)
       throw new Error(`Horizontal overflow at ${width}`);
     if (width >= 1366 && measured.mainBottom > height + 1)

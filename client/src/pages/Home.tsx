@@ -1678,15 +1678,17 @@ export default function Home() {
   return (
     <div className="ui-dense compact-deck relative min-h-screen">
       <header className="relative z-10 border-b border-white/10 bg-[#11120f]/85 backdrop-blur-xl">
-        <div className="mx-auto flex h-[48px] max-w-[1600px] items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-3">
+        <div className="compact-header mx-auto max-w-[1600px] px-4 sm:px-6">
+          <div className="compact-brand flex items-center gap-3">
             <SignalMark />
             <div className="brand-engraving">
               <p className="wordmark m-0 text-lg text-[#f5f4ec]">MADRV PLAYER</p>
               <p className="mono m-0 mt-0.5 text-[9px] uppercase tracking-[0.21em] text-[#a9aca2]">Signal Deck / 01</p>
             </div>
           </div>
-          <div className="flex items-center gap-4 sm:gap-6">
+          <div className="header-soundfont" role="group" aria-label="SoundFont bank"><span className="mono header-soundfont-label">SoundFont bank</span><HelpTooltip label="SoundFont bank">GS向けSF2/DLSをローカルから選べます。MMLの@MIDIおよびMDRのMIDIトラックに使用します。</HelpTooltip><button ref={soundFontBankButtonRef} data-testid="soundfont-bank-button" title={soundfontName} onClick={() => sf2InputRef.current?.click()} className="mt-2 flex w-full items-center justify-between border border-white/15 bg-[#11120f] p-3 text-left outline-none transition-colors hover:border-primary/70 focus:border-primary focus:ring-1 focus:ring-primary/50"><span className="mono max-w-[190px] truncate text-[10px] text-[#e4e6dc]">{soundfontName}</span><ChevronDown size={15} className="text-primary" /></button>
+<input ref={sf2InputRef} type="file" accept=".sf2,.sf3,.dls" className="hidden" onChange={selectSoundFont} /></div>
+          <div className="compact-header-links flex items-center gap-4 sm:gap-6">
             <span className="mono hidden items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-[#a9aca2] sm:inline-flex"><span className="h-1.5 w-1.5 rounded-full bg-primary" />Browser local</span>
             <button type="button" data-testid="format-guide-button" onClick={() => setFormatGuideOpen(true)} className="mono flex items-center gap-1.5 text-[10px] uppercase tracking-[0.16em] text-[#d7d9d1] transition-colors hover:text-primary"><Info size={13} />Format guide</button>
           </div>
@@ -1836,13 +1838,12 @@ export default function Home() {
         </section>
         <div className="compact-column program-output">
           <CompactPanel ref={soundFontPanelRef} id="soundfont" title="SoundFont / MIDI" defaultOpen summary={soundfontName}>
-              <div className="flex items-center gap-1"><HelpTooltip label="SoundFont・MIDI出力">GS向けSF2/DLSをローカルから選べます。MMLの@MIDIおよびMDRのMIDIトラックに使用します。<br /><br />外部出力では@MIDIのノートとAll Notes Offを選択機器へ送出します。OPM・PCMはブラウザ内で鳴ります。</HelpTooltip><button ref={soundFontBankButtonRef} data-testid="soundfont-bank-button" onClick={() => sf2InputRef.current?.click()} className="mt-2 flex w-full items-center justify-between border border-white/15 bg-[#11120f] p-3 text-left outline-none transition-colors hover:border-primary/70 focus:border-primary focus:ring-1 focus:ring-primary/50"><span className="mono max-w-[190px] truncate text-[10px] text-[#e4e6dc]">{soundfontName}</span><ChevronDown size={15} className="text-primary" /></button></div>
-<input ref={sf2InputRef} type="file" accept=".sf2,.sf3,.dls" className="hidden" onChange={selectSoundFont} />
 
-              <div className="compact-midi-destination mt-3 grid grid-cols-2 gap-1 border border-white/15 bg-[#11120f] p-1">
+
+              <div className="flex items-center gap-1"><HelpTooltip label="MIDI出力">外部出力では@MIDIのノートとAll Notes Offを選択機器へ送出します。OPM・PCMはブラウザ内で鳴ります。</HelpTooltip><div className="compact-midi-destination min-w-0 flex-1 grid grid-cols-2 gap-1 border border-white/15 bg-[#11120f] p-1">
                       <button onClick={useSoundFont} className={`mono px-2 py-2 text-[9px] uppercase tracking-[0.08em] transition-colors ${midiOutputMode === "soundfont" ? "bg-primary text-primary-foreground" : "text-[#a9aca2] hover:text-[#f5f4ec]"}`}>SoundFont</button>
                       <button onClick={enableExternalMidi} className={`mono px-2 py-2 text-[9px] uppercase tracking-[0.08em] transition-colors ${midiOutputMode === "hardware" ? "bg-primary text-primary-foreground" : "text-[#a9aca2] hover:text-[#f5f4ec]"}`}>External MIDI</button>
-                    </div>
+                    </div></div>
               {midiOutputMode === "hardware" && <select value={selectedMidiDevice} onChange={(event) => changeMidiDevice(event.target.value)} className="mono mt-3 w-full border border-white/15 bg-[#11120f] px-3 py-3 text-[10px] text-[#f5f4ec] outline-none focus:border-primary"><option value="" disabled>出力機器を選択</option>{midiDevices.map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}</select>}
               <CompactPanel id="remote-soundfont" title="SoundFontをURLから読み込む" summary={remoteSoundfontLoading ? "Loading…" : undefined}><div className="flex items-center justify-between"><SmallLabel help={<>Default SoundFontはこのボタンだけで自動ロードします。CORS対応URLはブラウザから直接読み込みます。Google Drive／Dropbox共有リンクは、直接読込が許可されない場合だけ8 MB単位の補助取得へ切り替え、最大320 MBまで読み込みます。共有設定は「リンクを知っている全員・閲覧者」、ダウンロード制限は解除してください。</>}>Remote SoundFont / CORS</SmallLabel></div>
 <div className="mt-2 flex gap-1.5"><input value={remoteSoundfontUrl} onChange={(event) => setRemoteSoundfontUrl(event.target.value)} placeholder="https://example.org/gs.sf2 またはDrive／Dropbox共有リンク" className="mono min-w-0 flex-1 border border-white/15 bg-[#11120f] px-2.5 py-2 text-[9px] text-[#f5f4ec] outline-none placeholder:text-[#62675d] focus:border-primary" /><button onClick={() => void loadRemoteSoundFont()} disabled={remoteSoundfontLoading} className="mono border border-white/25 px-2 text-[8px] uppercase tracking-[0.07em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">{remoteSoundfontLoading ? <LoaderCircle size={12} className="animate-spin" /> : "Load"}</button></div>

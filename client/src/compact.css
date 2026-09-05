@@ -516,3 +516,52 @@
     padding: 0 6px 6px;
   }
 }
+
+/* Bank selection stays at the top even when output settings are folded. */
+.compact-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "brand bank links";
+  align-items: center;
+  gap: 16px;
+  height: 48px;
+}
+.compact-brand {
+  grid-area: brand;
+}
+.compact-header-links {
+  grid-area: links;
+  white-space: nowrap;
+}
+.header-soundfont {
+  grid-area: bank;
+  display: flex;
+  align-items: center;
+  justify-self: center;
+  gap: 6px;
+  width: 100%;
+  max-width: 560px;
+  min-width: 0;
+}
+.header-soundfont-label {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #c7cbbe;
+}
+.header-soundfont [data-testid="soundfont-bank-button"] {
+  height: 34px;
+}
+@media (max-width: 1000px) {
+  .compact-header-links > span {
+    display: none;
+  }
+}
+@media (max-width: 700px) {
+  .compact-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "brand links" "bank bank";
+    gap: 6px 10px;
+    height: auto;
+    padding-block: 6px;
+  }
+}
