@@ -1,0 +1,23 @@
+#title "Welcome Racer portamento regression"
+#ex-mdr
+@1 ={31,12,4,10,1,32,0,12,3,0,0,
+31,2,4,5,15,57,3,15,4,0,0,
+31,12,4,6,0,30,0,1,3,0,0,
+31,15,7,7,2,0,2,3,2,0,0,
+2,7,15}
+@0={23,26,5,6,3,21,1,7,0,0,0,
+22,9,9,6,7,24,0,1,0,0,0,
+7,11,3,8,0,43,0,10,0,0,0,
+31,22,4,7,2,0,2,4,0,0,0,
+3,4,15}
+A CHF1 t140
+D CHF4 @1 o4 v15 r16 p2f8&f1&f1 e1&e1 e-1&e-1 a1&a1
+a C1 BR12 @36 o1 v15 l16 r16q6b-8&
+a L
+a q6b-8q5b32r32r16>q7c16r16<a-16q7b-8.q5b-16r16r4 r4.r16q8<e16>e4^8._<e >q7b-16&
+a q6b-8q4b32r32r16>q5c16r16<a-16q7b-8.q5b-16r16r4 q1b-64r64r32r16r8r8.q1b-32r32q8a-q6b-r>b-r8.<vb-16
+a q6b-8q4b32r32r16>q5c16r16<a-16q7b-8.q5b-16r16r4 r4 r4 q5l16>f<q6f8q5fq8>q6g<q8g>q6g+<q8g+
+a q6b-8q4b32r32r16>q5c16r16<a-16q7b-8.q5b-16r16r4 r4r4q8b-q2b-32r32q1b-32r32q7b-q3b-q7b-q4b-q7b-16&
+b C10 l16 o2d16c8o2 L r8c8d8c4c8d4 c4d4r8c8d16c8. c4d8.c8.c8d4 c4d8.c16c8c8d16c8.
+b c8c8d8.c8.c8d4 c4d8.c16c8c8d16c8. c8c8d8.c8.c8d4 c4d4c8dc8ddc
+c C10 o3v15 c+16r8o2 v14 L [a+4a+4a+4a+4]8

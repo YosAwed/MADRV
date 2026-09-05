@@ -1,0 +1,290 @@
+[
+  {
+    "name": "BELL20_SC.MDR",
+    "route": "OPM + MIDI（PDXは指定曲のみ）",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.2875392735004425,
+      "audibleSamples": 482,
+      "samples": 536
+    },
+    "baselineAudio": {
+      "peak": 0.2758290469646454,
+      "audibleSamples": 481,
+      "samples": 541
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "BOMB.MDR",
+    "route": "OPM + MIDI（PDXは指定曲のみ）",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.640388011932373,
+      "audibleSamples": 481,
+      "samples": 483
+    },
+    "baselineAudio": {
+      "peak": 0.9161744713783264,
+      "audibleSamples": 482,
+      "samples": 483
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "CLI01_SC.MDR",
+    "route": "MIDIフォールバック",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.44295045733451843,
+      "audibleSamples": 482,
+      "samples": 483
+    },
+    "baselineAudio": {
+      "peak": 0.44457006454467773,
+      "audibleSamples": 482,
+      "samples": 483
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "CLI15_SC.MDR",
+    "route": "MIDIフォールバック",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.32594847679138184,
+      "audibleSamples": 483,
+      "samples": 484
+    },
+    "baselineAudio": {
+      "peak": 0.3330188989639282,
+      "audibleSamples": 482,
+      "samples": 482
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "CLI19SC_.MDR",
+    "route": "MIDIフォールバック",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.5092523694038391,
+      "audibleSamples": 481,
+      "samples": 482
+    },
+    "baselineAudio": {
+      "peak": 0.4809812307357788,
+      "audibleSamples": 483,
+      "samples": 483
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "CLI19_SC.MDR",
+    "route": "OPM + MIDI（PDXは指定曲のみ）",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.46416011452674866,
+      "audibleSamples": 482,
+      "samples": 483
+    },
+    "baselineAudio": {
+      "peak": 0.44141170382499695,
+      "audibleSamples": 481,
+      "samples": 483
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "CONTROL.MDR",
+    "route": "GS MIDI",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.3094766438007355,
+      "audibleSamples": 447,
+      "samples": 484
+    },
+    "baselineAudio": {
+      "peak": 0.3179703950881958,
+      "audibleSamples": 450,
+      "samples": 484
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "DQ29A_SC.MDR",
+    "route": "MIDIフォールバック",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.45138558745384216,
+      "audibleSamples": 476,
+      "samples": 483
+    },
+    "baselineAudio": {
+      "peak": 0.4292140007019043,
+      "audibleSamples": 476,
+      "samples": 484
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "D_Re_EDGS.MDR",
+    "route": "MIDIフォールバック",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.6300724148750305,
+      "audibleSamples": 481,
+      "samples": 482
+    },
+    "baselineAudio": {
+      "peak": 0.6279940605163574,
+      "audibleSamples": 483,
+      "samples": 483
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "ED1_SC_ぜくせくす.MDR",
+    "route": "MIDIフォールバック",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.31875520944595337,
+      "audibleSamples": 485,
+      "samples": 486
+    },
+    "baselineAudio": {
+      "peak": 0.255643367767334,
+      "audibleSamples": 481,
+      "samples": 482
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "ED1_SC_ぜくせくす2.MDR",
+    "route": "MIDIフォールバック",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.26512235403060913,
+      "audibleSamples": 479,
+      "samples": 487
+    },
+    "baselineAudio": {
+      "peak": 0.2732633948326111,
+      "audibleSamples": 482,
+      "samples": 482
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "LCM_GS.MDR",
+    "route": "GS MIDI",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.3248562812805176,
+      "audibleSamples": 482,
+      "samples": 482
+    },
+    "baselineAudio": {
+      "peak": 0.3031688928604126,
+      "audibleSamples": 482,
+      "samples": 482
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "MJ_RUMI_SC.MDR",
+    "route": "OPM + MIDI（PDXは指定曲のみ）",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.27483248710632324,
+      "audibleSamples": 483,
+      "samples": 483
+    },
+    "baselineAudio": {
+      "peak": 0.26462483406066895,
+      "audibleSamples": 482,
+      "samples": 483
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "PHELD_SC_.MDR",
+    "route": "MIDIフォールバック",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.34516966342926025,
+      "audibleSamples": 481,
+      "samples": 483
+    },
+    "baselineAudio": {
+      "peak": 0.3250695466995239,
+      "audibleSamples": 481,
+      "samples": 483
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "PRIN_GS.MDR",
+    "route": "OPM + MIDI（PDXは指定曲のみ）",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.5170556902885437,
+      "audibleSamples": 482,
+      "samples": 483
+    },
+    "baselineAudio": {
+      "peak": 0.4703572988510132,
+      "audibleSamples": 482,
+      "samples": 482
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "SDI_ENDING.MDR",
+    "route": "GS MIDI",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.2220977395772934,
+      "audibleSamples": 482,
+      "samples": 484
+    },
+    "baselineAudio": {
+      "peak": 0.2337014079093933,
+      "audibleSamples": 481,
+      "samples": 481
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "SOUL_GS.MDR",
+    "route": "OPM + MIDI（PDXは指定曲のみ）",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.30913716554641724,
+      "audibleSamples": 482,
+      "samples": 483
+    },
+    "baselineAudio": {
+      "peak": 0.31929734349250793,
+      "audibleSamples": 483,
+      "samples": 483
+    },
+    "observationSeconds": 12
+  },
+  {
+    "name": "V9_SC.MDR",
+    "route": "MIDIフォールバック",
+    "baselineMatches": true,
+    "improvedAudio": {
+      "peak": 0.5665831565856934,
+      "audibleSamples": 475,
+      "samples": 483
+    },
+    "baselineAudio": {
+      "peak": 0.5656895637512207,
+      "audibleSamples": 476,
+      "samples": 482
+    },
+    "observationSeconds": 12
+  }
+]

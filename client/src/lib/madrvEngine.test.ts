@@ -261,6 +261,14 @@ describe("external MIDI timing correction", () => {
     expect(resolveTrustedMdrMidiLoopWindow(g2mWindow, 142.782, 5.208)).toEqual(g2mWindow);
   });
 
+  it("retains L windows for multi-cycle hardware patterns and saturated duration probes", () => {
+    const prinWindow = { startSeconds: 55.95, endSeconds: 111.642 };
+    expect(resolveTrustedMdrMidiLoopWindow(prinWindow, 21.018, 18.579)).toEqual(prinWindow);
+    const rumiWindow = { startSeconds: 41.118, endSeconds: 80.418 };
+    expect(resolveTrustedMdrMidiLoopWindow(rumiWindow, 1200.015, undefined)).toEqual(rumiWindow);
+    expect(resolveTrustedMdrMidiLoopWindow({ startSeconds: 0, endSeconds: 30 }, 20, 20)).toBeUndefined();
+  });
+
   it("resets the next infinite MIDI pass when the SoundFont lookahead reaches the loop boundary", () => {
     expect(resolveMdrInfiniteMidiCycle(43.867, 44.018, 0.15)).toBe(0);
     expect(resolveMdrInfiniteMidiCycle(43.868, 44.018, 0.15)).toBe(1);

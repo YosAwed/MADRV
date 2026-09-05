@@ -1,0 +1,632 @@
+[
+  {
+    "name": "BOMB.MDR",
+    "info": {
+      "duration": 83.650875,
+      "format": "MDR / OPM + PDX",
+      "startsAt": 0.185,
+      "loopWindow": {
+        "startSeconds": 40.109625,
+        "endSeconds": 80.105625
+      },
+      "eventCount": 6935
+    },
+    "initialOpmPeak": 0.27925994992256165,
+    "observedSeconds": 124.10162500000001,
+    "boundaries": [
+      {
+        "at": 80.105625,
+        "opmPeak": 0.23039978742599487,
+        "midiPeak": 0.579166054725647,
+        "midiNoteOns": 92,
+        "firstNoteDelay": 0.07895833333331836,
+        "samples": 80,
+        "hardwareBefore": 79185,
+        "hardwareAfter": 83107
+      },
+      {
+        "at": 120.10162500000001,
+        "opmPeak": 0.22346800565719604,
+        "midiPeak": 0.5965728163719177,
+        "midiNoteOns": 92,
+        "firstNoteDelay": 0.09195833333330938,
+        "samples": 80,
+        "hardwareBefore": 119157,
+        "hardwareAfter": 123136
+      }
+    ],
+    "ended": false,
+    "errors": [],
+    "status": "pass",
+    "silentBoundarySamples": 0,
+    "boundarySampleCount": 160
+  },
+  {
+    "name": "CLI01_SC.MDR",
+    "info": {
+      "duration": 105.572,
+      "format": "MDR / GS MIDI",
+      "startsAt": 0.137,
+      "loopWindow": {
+        "startSeconds": 53.656,
+        "endSeconds": 103.704
+      },
+      "eventCount": 5542
+    },
+    "initialOpmPeak": 0,
+    "observedSeconds": 157.75199999999998,
+    "boundaries": [
+      {
+        "at": 103.704,
+        "opmPeak": 0,
+        "midiPeak": 0.6171728372573853,
+        "midiNoteOns": 73,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      },
+      {
+        "at": 153.75199999999998,
+        "opmPeak": 0,
+        "midiPeak": 0.5501680970191956,
+        "midiNoteOns": 73,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      }
+    ],
+    "ended": false,
+    "errors": [],
+    "status": "pass",
+    "silentBoundarySamples": 0,
+    "boundarySampleCount": 160
+  },
+  {
+    "name": "BELL20_SC.MDR",
+    "info": {
+      "duration": 107.95425,
+      "format": "MDR / OPM + PDX",
+      "startsAt": 0.23833333333333334,
+      "loopWindow": {
+        "startSeconds": 54.57825,
+        "endSeconds": 106.45425
+      },
+      "eventCount": 3225
+    },
+    "initialOpmPeak": 0.11944152414798737,
+    "observedSeconds": 162.33025,
+    "boundaries": [
+      {
+        "at": 106.45425,
+        "opmPeak": 0.1480068862438202,
+        "midiPeak": 0.3307620882987976,
+        "midiNoteOns": 26,
+        "firstNoteDelay": 0.16075000000000728,
+        "samples": 80,
+        "hardwareBefore": 105545,
+        "hardwareAfter": 109518
+      },
+      {
+        "at": 158.33025,
+        "opmPeak": 0.14678069949150085,
+        "midiPeak": 0.34000441431999207,
+        "midiNoteOns": 26,
+        "firstNoteDelay": 0.16741666666663946,
+        "samples": 80,
+        "hardwareBefore": 157384,
+        "hardwareAfter": 161357
+      }
+    ],
+    "ended": false,
+    "errors": [],
+    "status": "pass",
+    "silentBoundarySamples": 0,
+    "boundarySampleCount": 160
+  },
+  {
+    "name": "CLI15_SC.MDR",
+    "info": {
+      "duration": 102.424,
+      "format": "MDR / GS MIDI",
+      "startsAt": 0.20099999999999998,
+      "loopWindow": {
+        "startSeconds": 50.536,
+        "endSeconds": 100.04
+      },
+      "eventCount": 3206
+    },
+    "initialOpmPeak": 0,
+    "observedSeconds": 153.544,
+    "boundaries": [
+      {
+        "at": 100.04,
+        "opmPeak": 0,
+        "midiPeak": 0.4230272173881531,
+        "midiNoteOns": 41,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      },
+      {
+        "at": 149.544,
+        "opmPeak": 0,
+        "midiPeak": 0.42026740312576294,
+        "midiNoteOns": 41,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      }
+    ],
+    "ended": false,
+    "errors": [],
+    "status": "pass",
+    "silentBoundarySamples": 0,
+    "boundarySampleCount": 160
+  },
+  {
+    "name": "CLI19SC_.MDR",
+    "info": {
+      "duration": 89.3,
+      "format": "MDR / GS MIDI",
+      "startsAt": 0.161,
+      "loopWindow": {
+        "startSeconds": 44.416,
+        "endSeconds": 87.8
+      },
+      "eventCount": 2464
+    },
+    "initialOpmPeak": 0,
+    "observedSeconds": 135.184,
+    "boundaries": [
+      {
+        "at": 87.8,
+        "opmPeak": 0,
+        "midiPeak": 0.5835981965065002,
+        "midiNoteOns": 41,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      },
+      {
+        "at": 131.184,
+        "opmPeak": 0,
+        "midiPeak": 0.5367012619972229,
+        "midiNoteOns": 41,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      }
+    ],
+    "ended": false,
+    "errors": [],
+    "status": "pass",
+    "silentBoundarySamples": 0,
+    "boundarySampleCount": 160
+  },
+  {
+    "name": "CLI19_SC.MDR",
+    "info": {
+      "duration": 89.3,
+      "format": "MDR / OPM + PDX",
+      "startsAt": 0.21966666666666668,
+      "loopWindow": {
+        "startSeconds": 44.416,
+        "endSeconds": 87.8
+      },
+      "eventCount": 2772
+    },
+    "initialOpmPeak": 0.11790252476930618,
+    "observedSeconds": 135.184,
+    "boundaries": [
+      {
+        "at": 87.8,
+        "opmPeak": 0.10490234196186066,
+        "midiPeak": 0.5538982152938843,
+        "midiNoteOns": 45,
+        "firstNoteDelay": 0.14033333333333076,
+        "samples": 80,
+        "hardwareBefore": 86861,
+        "hardwareAfter": 90828
+      },
+      {
+        "at": 131.184,
+        "opmPeak": 0.10575316846370697,
+        "midiPeak": 0.543869137763977,
+        "midiNoteOns": 45,
+        "firstNoteDelay": 0.15100000000001046,
+        "samples": 80,
+        "hardwareBefore": 130291,
+        "hardwareAfter": 134218
+      }
+    ],
+    "ended": false,
+    "errors": [],
+    "status": "pass",
+    "silentBoundarySamples": 0,
+    "boundarySampleCount": 160
+  },
+  {
+    "name": "ED1_SC_ぜくせくす.MDR",
+    "info": {
+      "duration": 39.46,
+      "format": "MDR / GS MIDI",
+      "startsAt": 0.177,
+      "loopWindow": {
+        "startSeconds": 19.496,
+        "endSeconds": 37.96
+      },
+      "eventCount": 1037
+    },
+    "initialOpmPeak": 0,
+    "observedSeconds": 60.42400000000001,
+    "boundaries": [
+      {
+        "at": 37.96,
+        "opmPeak": 0,
+        "midiPeak": 0.3300822675228119,
+        "midiNoteOns": 30,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      },
+      {
+        "at": 56.42400000000001,
+        "opmPeak": 0,
+        "midiPeak": 0.2777210474014282,
+        "midiNoteOns": 30,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      }
+    ],
+    "ended": false,
+    "errors": [],
+    "status": "pass",
+    "silentBoundarySamples": 0,
+    "boundarySampleCount": 160
+  },
+  {
+    "name": "ED1_SC_ぜくせくす2.MDR",
+    "info": {
+      "duration": 39.46,
+      "format": "MDR / GS MIDI",
+      "startsAt": 0.137,
+      "loopWindow": {
+        "startSeconds": 19.496,
+        "endSeconds": 37.96
+      },
+      "eventCount": 963
+    },
+    "initialOpmPeak": 0,
+    "observedSeconds": 60.42400000000001,
+    "boundaries": [
+      {
+        "at": 37.96,
+        "opmPeak": 0,
+        "midiPeak": 0.2901047468185425,
+        "midiNoteOns": 30,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      },
+      {
+        "at": 56.42400000000001,
+        "opmPeak": 0,
+        "midiPeak": 0.30905652046203613,
+        "midiNoteOns": 30,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      }
+    ],
+    "ended": false,
+    "errors": [],
+    "status": "pass",
+    "silentBoundarySamples": 0,
+    "boundarySampleCount": 160
+  },
+  {
+    "name": "DQ29A_SC.MDR",
+    "info": {
+      "duration": 62.18,
+      "format": "MDR / GS MIDI",
+      "startsAt": 0.21166666666666667,
+      "loopWindow": {
+        "startSeconds": 30.856,
+        "endSeconds": 60.68
+      },
+      "eventCount": 3539
+    },
+    "initialOpmPeak": 0,
+    "observedSeconds": 94.50399999999999,
+    "boundaries": [
+      {
+        "at": 60.68,
+        "opmPeak": 0,
+        "midiPeak": 0.4971957206726074,
+        "midiNoteOns": 100,
+        "firstNoteDelay": 0.005333333333332746,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      },
+      {
+        "at": 90.50399999999999,
+        "opmPeak": 0,
+        "midiPeak": 0.4961564540863037,
+        "midiNoteOns": 100,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      }
+    ],
+    "ended": false,
+    "errors": [],
+    "status": "pass",
+    "silentBoundarySamples": 0,
+    "boundarySampleCount": 160
+  },
+  {
+    "name": "LCM_GS.MDR",
+    "info": {
+      "duration": 63.844,
+      "format": "MDR / GS MIDI",
+      "startsAt": 0.18233333333333332,
+      "loopWindow": {
+        "startSeconds": 31.688,
+        "endSeconds": 62.344
+      },
+      "eventCount": 1828
+    },
+    "initialOpmPeak": 0,
+    "observedSeconds": 97,
+    "boundaries": [
+      {
+        "at": 62.344,
+        "opmPeak": 0,
+        "midiPeak": 0.34769725799560547,
+        "midiNoteOns": 40,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      },
+      {
+        "at": 93,
+        "opmPeak": 0,
+        "midiPeak": 0.32105880975723267,
+        "midiNoteOns": 40,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      }
+    ],
+    "ended": false,
+    "errors": [],
+    "status": "pass",
+    "silentBoundarySamples": 0,
+    "boundarySampleCount": 160
+  },
+  {
+    "name": "PHELD_SC_.MDR",
+    "info": {
+      "duration": 60.7485,
+      "format": "MDR / GS MIDI",
+      "startsAt": 0.20633333333333334,
+      "loopWindow": {
+        "startSeconds": 31.472,
+        "endSeconds": 58.868
+      },
+      "eventCount": 2078
+    },
+    "initialOpmPeak": 0,
+    "observedSeconds": 90.26400000000001,
+    "boundaries": [
+      {
+        "at": 58.868,
+        "opmPeak": 0,
+        "midiPeak": 0.35250264406204224,
+        "midiNoteOns": 44,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      },
+      {
+        "at": 86.26400000000001,
+        "opmPeak": 0,
+        "midiPeak": 0.40028876066207886,
+        "midiNoteOns": 44,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      }
+    ],
+    "ended": false,
+    "errors": [],
+    "status": "pass",
+    "silentBoundarySamples": 0,
+    "boundarySampleCount": 160
+  },
+  {
+    "name": "MJ_RUMI_SC.MDR",
+    "info": {
+      "duration": 1200.015,
+      "format": "MDR / OPM + PDX",
+      "startsAt": 0.273,
+      "loopWindow": {
+        "startSeconds": 41.118,
+        "endSeconds": 80.418
+      },
+      "eventCount": 5500
+    },
+    "initialOpmPeak": 0.11483703553676605,
+    "observedSeconds": 123.71800000000002,
+    "boundaries": [
+      {
+        "at": 80.418,
+        "opmPeak": 0.12493438273668289,
+        "midiPeak": 0.34298375248908997,
+        "midiNoteOns": 99,
+        "firstNoteDelay": 0.13833333333333542,
+        "samples": 80,
+        "hardwareBefore": 79478,
+        "hardwareAfter": 83443
+      },
+      {
+        "at": 119.71800000000002,
+        "opmPeak": 0.12494689226150513,
+        "midiPeak": 0.374234676361084,
+        "midiNoteOns": 99,
+        "firstNoteDelay": 0.1423333333333261,
+        "samples": 80,
+        "hardwareBefore": 118816,
+        "hardwareAfter": 122748
+      }
+    ],
+    "ended": false,
+    "errors": [],
+    "status": "pass",
+    "silentBoundarySamples": 0,
+    "boundarySampleCount": 160
+  },
+  {
+    "name": "V9_SC.MDR",
+    "info": {
+      "duration": 47.149,
+      "format": "MDR / GS MIDI",
+      "startsAt": 0.14766666666666667,
+      "loopWindow": {
+        "startSeconds": 23.549,
+        "endSeconds": 45.649
+      },
+      "eventCount": 1237
+    },
+    "initialOpmPeak": 0,
+    "observedSeconds": 71.749,
+    "boundaries": [
+      {
+        "at": 45.649,
+        "opmPeak": 0,
+        "midiPeak": 0.7667160034179688,
+        "midiNoteOns": 38,
+        "firstNoteDelay": 0,
+        "samples": 81,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      },
+      {
+        "at": 67.749,
+        "opmPeak": 0,
+        "midiPeak": 0.7353179454803467,
+        "midiNoteOns": 38,
+        "firstNoteDelay": 0,
+        "samples": 80,
+        "hardwareBefore": null,
+        "hardwareAfter": null
+      }
+    ],
+    "ended": false,
+    "errors": [],
+    "status": "pass",
+    "silentBoundarySamples": 0,
+    "boundarySampleCount": 161
+  },
+  {
+    "name": "SOUL_GS.MDR",
+    "info": {
+      "duration": 98.96925,
+      "format": "MDR / OPM + PDX",
+      "startsAt": 0.22766666666666668,
+      "loopWindow": {
+        "startSeconds": 49.18125,
+        "endSeconds": 97.46925
+      },
+      "eventCount": 6077
+    },
+    "initialOpmPeak": 0.06648986786603928,
+    "observedSeconds": 149.75725,
+    "boundaries": [
+      {
+        "at": 97.46925,
+        "opmPeak": 0.06661499291658401,
+        "midiPeak": 0.33635058999061584,
+        "midiNoteOns": 85,
+        "firstNoteDelay": 0.007666666666665378,
+        "samples": 80,
+        "hardwareBefore": 96585,
+        "hardwareAfter": 100511
+      },
+      {
+        "at": 145.75725,
+        "opmPeak": 0.06658996641635895,
+        "midiPeak": 0.36854422092437744,
+        "midiNoteOns": 80,
+        "firstNoteDelay": 0.11074999999999591,
+        "samples": 80,
+        "hardwareBefore": 144846,
+        "hardwareAfter": 148772
+      }
+    ],
+    "ended": false,
+    "errors": [],
+    "status": "pass",
+    "silentBoundarySamples": 0,
+    "boundarySampleCount": 160
+  },
+  {
+    "name": "PRIN_GS.MDR",
+    "info": {
+      "duration": 113.142,
+      "format": "MDR / OPM + PDX",
+      "startsAt": 0.2836666666666667,
+      "loopWindow": {
+        "startSeconds": 55.95,
+        "endSeconds": 111.642
+      },
+      "eventCount": 4064
+    },
+    "initialOpmPeak": 0.36154019832611084,
+    "observedSeconds": 171.334,
+    "boundaries": [
+      {
+        "at": 111.642,
+        "opmPeak": 0.3653939962387085,
+        "midiPeak": 0.420645534992218,
+        "midiNoteOns": 50,
+        "firstNoteDelay": 0.16500000000000625,
+        "samples": 80,
+        "hardwareBefore": 110711,
+        "hardwareAfter": 114679
+      },
+      {
+        "at": 167.334,
+        "opmPeak": 0.3670455813407898,
+        "midiPeak": 0.4531925916671753,
+        "midiNoteOns": 50,
+        "firstNoteDelay": 0.15033333333332166,
+        "samples": 80,
+        "hardwareBefore": 166436,
+        "hardwareAfter": 170362
+      }
+    ],
+    "ended": false,
+    "errors": [],
+    "status": "pass",
+    "silentBoundarySamples": 0,
+    "boundarySampleCount": 160
+  }
+]

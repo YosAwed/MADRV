@@ -1,0 +1,174 @@
+{
+  "beforeStress": {
+    "pitchWheel": 3,
+    "checkpoints": [],
+    "info": {
+      "duration": 27.72375,
+      "format": "MDR / OPM + PDX"
+    }
+  },
+  "afterStress": {
+    "pitchWheel": 8192,
+    "checkpoints": [],
+    "info": {
+      "duration": 27.72375,
+      "format": "MDR / OPM + PDX"
+    }
+  },
+  "mobileLoop": {
+    "pitchWheel": 8192,
+    "checkpoints": [
+      {
+        "atMs": 6000,
+        "pitchWheel": 8192
+      },
+      {
+        "atMs": 19000,
+        "pitchWheel": 8192
+      },
+      {
+        "atMs": 32000,
+        "pitchWheel": 8192
+      }
+    ],
+    "info": {
+      "duration": 27.72375,
+      "format": "MDR / OPM + PDX"
+    }
+  },
+  "restart": {
+    "pitchWheel": 8192,
+    "checkpoints": [
+      {
+        "atMs": 6000,
+        "pitchWheel": 8192
+      }
+    ],
+    "info": {
+      "duration": 27.72375,
+      "format": "MDR / OPM + PDX"
+    }
+  },
+  "loopRegression": [
+    {
+      "name": "MJ_RUMI_SC.MDR",
+      "info": {
+        "duration": 1200.015,
+        "format": "MDR / OPM + PDX",
+        "startsAt": 0.6036666666666667,
+        "loopWindow": {
+          "startSeconds": 41.118,
+          "endSeconds": 80.418
+        },
+        "eventCount": 5500
+      },
+      "initialOpmPeak": 0.11773986369371414,
+      "observedSeconds": 123.71800000000002,
+      "boundaries": [
+        {
+          "at": 80.418,
+          "opmPeak": 0.12493438273668289,
+          "midiPeak": 0.3098602592945099,
+          "midiNoteOns": 99,
+          "firstNoteDelay": 0.16233333333332212,
+          "samples": 80,
+          "hardwareBefore": 79527,
+          "hardwareAfter": 83443
+        },
+        {
+          "at": 119.71800000000002,
+          "opmPeak": 0.12392089515924454,
+          "midiPeak": 0.3187721371650696,
+          "midiNoteOns": 99,
+          "firstNoteDelay": 0.1556666666666473,
+          "samples": 80,
+          "hardwareBefore": 118816,
+          "hardwareAfter": 122748
+        }
+      ],
+      "ended": false,
+      "errors": [],
+      "status": "pass"
+    },
+    {
+      "name": "BOMB.MDR",
+      "info": {
+        "duration": 83.650875,
+        "format": "MDR / OPM + PDX",
+        "startsAt": 0.45433333333333337,
+        "loopWindow": {
+          "startSeconds": 40.109625,
+          "endSeconds": 80.105625
+        },
+        "eventCount": 6935
+      },
+      "initialOpmPeak": 0.27925994992256165,
+      "observedSeconds": 124.10162500000001,
+      "boundaries": [
+        {
+          "at": 80.105625,
+          "opmPeak": 0.23039978742599487,
+          "midiPeak": 0.6024401783943176,
+          "midiNoteOns": 92,
+          "firstNoteDelay": 0.08962499999998386,
+          "samples": 80,
+          "hardwareBefore": 79185,
+          "hardwareAfter": 83145
+        },
+        {
+          "at": 120.10162500000001,
+          "opmPeak": 0.23031219840049744,
+          "midiPeak": 0.5208214521408081,
+          "midiNoteOns": 92,
+          "firstNoteDelay": 0.09729166666664923,
+          "samples": 80,
+          "hardwareBefore": 119214,
+          "hardwareAfter": 123136
+        }
+      ],
+      "ended": false,
+      "errors": [],
+      "status": "pass"
+    },
+    {
+      "name": "PRIN_GS.MDR",
+      "info": {
+        "duration": 113.142,
+        "format": "MDR / OPM + PDX",
+        "startsAt": 0.361,
+        "loopWindow": {
+          "startSeconds": 55.95,
+          "endSeconds": 111.642
+        },
+        "eventCount": 4064
+      },
+      "initialOpmPeak": 0.3661196827888489,
+      "observedSeconds": 171.334,
+      "boundaries": [
+        {
+          "at": 111.642,
+          "opmPeak": 0.3653939962387085,
+          "midiPeak": 0.4159700572490692,
+          "midiNoteOns": 50,
+          "firstNoteDelay": 0.15166666666667084,
+          "samples": 80,
+          "hardwareBefore": 110753,
+          "hardwareAfter": 114679
+        },
+        {
+          "at": 167.334,
+          "opmPeak": 0.3670455813407898,
+          "midiPeak": 0.42772239446640015,
+          "midiNoteOns": 50,
+          "firstNoteDelay": 0.15300000000002,
+          "samples": 80,
+          "hardwareBefore": 166436,
+          "hardwareAfter": 170403
+        }
+      ],
+      "ended": false,
+      "errors": [],
+      "status": "pass"
+    }
+  ]
+}

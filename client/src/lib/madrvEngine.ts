@@ -1,3 +1,5 @@
+import { OrderedMidiQueue } from "./orderedMidiQueue";
+
 /* Signal Deck engine: MML is synthesized locally; MDR inspection follows the mpxadrv header and 32-track layout. */
 export type EngineKind = "opm" | "pcm" | "midi";
 export type PlaybackPerformanceProfile = "desktop" | "mobile";
@@ -893,10 +895,15 @@ export function resolveTrustedMdrMidiLoopWindow(
   const period = endSeconds - startSeconds;
   if (Number.isFinite(hardwareCycleSeconds) && (hardwareCycleSeconds as number) > 0) {
     const ratio = period / (hardwareCycleSeconds as number);
-    return ratio >= 0.85 && ratio <= 1.15 ? loopWindow : undefined;
+    // A MIDI arrangement can span several hardware ostinato loops (PRIN_GS).
+    const hardwareCycles = Math.round(ratio);
+    return hardwareCycles >= 1 && Math.abs(ratio - hardwareCycles) <= 0.15 ? loopWindow : undefined;
   }
   if (Number.isFinite(hardwareOnePassSeconds) && (hardwareOnePassSeconds as number) > 0) {
     const onePass = hardwareOnePassSeconds as number;
+    // The MXDRV duration probe saturates near 20 minutes on some looping PCM
+    // arrangements (MJ_RUMI_SC). That ceiling is not a measured song boundary.
+    if (onePass >= 1200) return loopWindow;
     // Misrecognized L: short MIDI period that ends well before the hardware pass.
     if (period < onePass * 0.5 && endSeconds < onePass * 0.85) return undefined;
   }
@@ -1477,8 +1484,13 @@ class MadrvWasmPlayer {
   async load(mdr: ArrayBuffer, pdx: ArrayBuffer | undefined, loops: number, sampleRate: number): Promise<MdrPlaybackInfo> {
     const info = inspectMdr(mdr);
     if (mdrRequiresPdx(info.pdxName) && !pdx) throw new Error(`このMDRはPCMデータ「${formatPdxFileName(info.pdxName)}」を必要とします。PDXファイルも指定してください。`);
-    this.converter ??= await this.loadModule(CONVERTER_MODULE_URL, CONVERTER_WASM_URL);
-    this.player ??= await this.loadModule(PLAYER_MODULE_URL, PLAYER_WASM_URL);
+    // These independent cores can download and instantiate concurrently.
+    const [converter, player] = await Promise.all([
+      this.converter ?? this.loadModule(CONVERTER_MODULE_URL, CONVERTER_WASM_URL),
+      this.player ?? this.loadModule(PLAYER_MODULE_URL, PLAYER_WASM_URL),
+    ]);
+    this.converter = converter;
+    this.player = player;
     const source = new Uint8Array(mdr);
     const sourcePointer = this.copyTo(this.converter, source);
     try {
@@ -1682,8 +1694,16 @@ export class SignalDeckAudio {
   private gains?: Record<EngineKind, GainNode>;
   private activeNodes: AudioScheduledSourceNode[] = [];
   private timers: number[] = [];
-  /** SoundFont MIDI timers are kept outside SpessaSynth so stop() can cancel events that have not yet reached the Worklet. */
-  private mdrSoundFontTimers = new Set<number>();
+  /** Preserve score order across live-clock corrections; STOP cancels unsent events. */
+  private mdrSoundFontQueue = new OrderedMidiQueue<{ bytes: number[]; sourceTrack: number; playbackGeneration: number }>({
+    now: () => this.graph.context.currentTime,
+    schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+    cancel: (timer) => window.clearTimeout(timer),
+    dispatch: ({ bytes, sourceTrack, playbackGeneration }, targetAt) => {
+      if (!shouldDispatchQueuedSoundFontMdrEvent(playbackGeneration, this.playbackGeneration, this.gsLoaded)) return;
+      this.sendMdrMidi(bytes, sourceTrack, 0, Math.max(this.graph.context.currentTime, targetAt));
+    },
+  });
   private endTimer?: number;
   private mdrMidiAnimationFrame?: number;
   private mdrMidiTimer?: number;
@@ -2205,33 +2225,9 @@ export class SignalDeckAudio {
   }
 
   private queueSoundFontMdrMidi(bytes: number[], sourceTrack: number, targetAt: number, playbackGeneration: number, scheduleInWorklet = false) {
-    const { context } = this.graph;
-    const scheduledAt = targetAt;
-    const delayMs = Math.max(0, (scheduledAt - context.currentTime) * 1000);
-    let timer: number | undefined;
-    // Loop-start controllers and first notes are sent to SpessaSynth with an
-    // AudioContext timestamp. Waiting for a browser timer at this boundary can
-    // miss the exact moment MXDRV wraps, especially when the main thread is
-    // occupied by ScriptProcessor callbacks. The normal finite-timeline path
-    // retains cancellable timers so STOP can suppress queued future notes.
-    if (scheduleInWorklet && scheduledAt > context.currentTime + 0.001) {
-      if (!shouldDispatchQueuedSoundFontMdrEvent(playbackGeneration, this.playbackGeneration, this.gsLoaded)) return;
-      this.sendMdrMidi(bytes, sourceTrack, 0, targetAt);
-      return;
-    }
-    const dispatch = () => {
-      if (timer !== undefined) this.mdrSoundFontTimers.delete(timer);
-      if (!shouldDispatchQueuedSoundFontMdrEvent(playbackGeneration, this.playbackGeneration, this.gsLoaded)) return;
-      // Dispatch at the callback, not as a future Worklet event. SpessaSynth's public API has no future-event cancellation;
-      // keeping the wait in a tracked timer makes STOP cancel queued notes before they can reach the AudioWorklet.
-      this.sendMdrMidi(bytes, sourceTrack);
-    };
-    if (delayMs <= 1) {
-      dispatch();
-      return;
-    }
-    timer = window.setTimeout(dispatch, delayMs);
-    this.mdrSoundFontTimers.add(timer);
+    // Independent timers could send a pitch reset before an older bend whose
+    // deadline was computed against the previous hardware-clock sample.
+    this.mdrSoundFontQueue.enqueue({ bytes, sourceTrack, playbackGeneration }, targetAt, scheduleInWorklet);
   }
 
   private startMdrMidiTimeline(events: readonly ScheduledMdrMidiEvent[], startsAt: number, loopWindow?: MdrMidiLoopWindow) {
@@ -2352,8 +2348,7 @@ export class SignalDeckAudio {
     this.mdrMidiAnimationFrame = undefined;
     if (this.mdrMidiTimer) window.clearTimeout(this.mdrMidiTimer);
     this.mdrMidiTimer = undefined;
-    this.mdrSoundFontTimers.forEach((timer) => window.clearTimeout(timer));
-    this.mdrSoundFontTimers.clear();
+    this.mdrSoundFontQueue.clear();
     this.mdrMidiTimelineComplete = true;
     this.timers.forEach((timer) => window.clearTimeout(timer));
     this.timers = [];
@@ -2429,6 +2424,11 @@ export class SignalDeckAudio {
     const songInfo: MdrPlaybackInfo = { ...info, duration: resolveMdrPlaybackDuration(info.duration, songMidiTimeline.events) };
     const totalHardwareDuration = needsHardwareRenderer && measuredLoops > 1 ? this.mdrPlayer!.measureDuration(measuredLoops) : info.duration;
     const totalPlaybackDuration = resolveMdrPlaybackDuration(totalHardwareDuration, midiEvents);
+    // Duration probing mutates the renderer: finish every measurement before
+    // start(), otherwise infinite playback can leave OPM/PCM silent.
+    const hardwareCycleSeconds = needsHardwareRenderer && loops <= 0
+      ? resolveMdrHardwareLoopCycleSeconds(info.duration, this.mdrPlayer!.measureDuration(2))
+      : undefined;
     // The MDR path keeps rendering in the stateful v11 core so actual MXDRV termination
     // and the browser's finite-loop setting cannot diverge from the displayed transport.
     if (needsHardwareRenderer) {
@@ -2463,9 +2463,6 @@ export class SignalDeckAudio {
     const startsAt = context.currentTime + (needsHardwareRenderer
       ? resolveMdrPlaybackStartLatencySeconds(this.performanceProfile, context.sampleRate, context.outputLatency, context.baseLatency)
       : 0.025);
-    const hardwareCycleSeconds = needsHardwareRenderer && loops <= 0
-      ? resolveMdrHardwareLoopCycleSeconds(info.duration, this.mdrPlayer!.measureDuration(2))
-      : undefined;
     const trustedMidiLoopWindow = loops <= 0
       ? resolveTrustedMdrMidiLoopWindow(midiTimeline.loopWindow, needsHardwareRenderer ? info.duration : undefined, hardwareCycleSeconds)
       : undefined;

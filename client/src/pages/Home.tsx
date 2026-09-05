@@ -1,5 +1,4 @@
 /* Signal Deck page: an asymmetrical studio console where source, signal paths, and controls stay visually distinct. */
-import { FormatGuideDialog } from "@/components/FormatGuideDialog";
 import { Button } from "@/components/ui/button";
 import {
   AlertTriangle,
@@ -23,13 +22,15 @@ import {
   Volume2,
   Waves,
 } from "lucide-react";
-import { ChangeEvent, DragEvent, memo, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { compileMml, extractMmlInitialTempo, fetchRemoteCatalog, fetchRemoteSoundFont, fetchSharedSoundFont, formatMidiNoteName, formatPdxFileName, inspectMadrvSource, inspectMdr, inspectMdx, isGoogleDriveShareUrl, isGsMidiEngineArmed, isMidiPlaybackDestinationReady, isOpmPcmEngineArmed, isPcmPdxEngineArmed, isPcmVoiceActive, isSafariBrowserUserAgent, isSignedTimingCorrectionDraft, limitScore, listMdrMixerTracks, mdrRequiresPdx, MdrInfo, MdrMixerTrack, MdxInfo, MidiDiagnosticEntry, MidiOutputDevice, MmlSyntaxError, normalizeExternalMidiAdvanceMs, normalizeRemoteAssetUrl, normalizeSoundFontMdrDelayMs, normalizeSoundFontMdrDelayProfiles, parseRemoteCatalogPayload, playbackProgressPercent, recommendPlaybackTuning, recommendSoundFontMdrDelayMs, RemoteCatalogEntry, requiresStableMadrvProfileForSoundFont, resolveNextPlaylistIndex, resolvePlaylistInterTrackSilenceSeconds, resolveSoundFontMdrDelayProfile, resolveSoundFontMdrTimingComparisonDelay, setSoundFontMdrDelayProfile, SignalDeckAudio, stepSoundFontMdrDelayMs, timerBToEstimatedBpm, updateSoundFontMdrDelayMeasurement, type MdrMidiSyncSnapshot, type MdrTrackKeyState, type PlaybackPerformanceProfile, type PlaybackTuningPreset, type PlaybackTuningRecommendation, type SoundFontMdrDelayMeasurement, type SoundFontMdrDelayProfiles, type SoundFontMdrTimingComparisonMode } from "@/lib/madrvEngine";
 import { DEFAULT_PLAYLIST_LOOP_COUNT, isPersistablePlaylistEntry, movePlaylistEntry, normalizePlaylistLoopCount, parseSavedPlaylist, SAVED_PLAYLIST_STORAGE_KEY, setPlaylistEntryLoopCount, type SavedPlaylistEntry } from "@/lib/playlistEntries";
 import { parseRecentSources, RECENT_SOURCES_STORAGE_KEY, removeRecentSource, upsertRecentSource, type RecentSource } from "@/lib/recentSources";
 import { persistLocalSoundFontSelection, persistRemoteSoundFontSelection, readCachedLocalSoundFont, readPersistedSoundFontSelection } from "@/lib/soundFontStorage";
 import { useIsMobile } from "@/hooks/useMobile";
 import { trpc } from "@/lib/trpc";
+
+const FormatGuideDialog = lazy(() => import("@/components/FormatGuideDialog").then((module) => ({ default: module.FormatGuideDialog })));
 
 type SourceMode = "local" | "mml" | "remote";
 
@@ -401,6 +402,12 @@ export default function Home() {
   const [gsPartLevel, setGsPartLevel] = useState(100);
   const [midiDiagnostics, setMidiDiagnostics] = useState<MidiDiagnosticEntry[]>([]);
   const [mixerTracks, setMixerTracks] = useState<MdrMixerTrack[]>([]);
+  const activeMixerTracks = useMemo(() => mixerTracks.filter((track) => track.active), [mixerTracks]);
+  const mixerTracksByEngine = useMemo(() => ({
+    opm: activeMixerTracks.filter((track) => track.engine === "opm"),
+    pcm: activeMixerTracks.filter((track) => track.engine === "pcm"),
+    midi: activeMixerTracks.filter((track) => track.engine === "midi"),
+  }), [activeMixerTracks]);
   const [mutedTracks, setMutedTracks] = useState<number[]>([]);
   const [soloTrack, setSoloTrack] = useState<number | null>(null);
   const [trackKeyState, setTrackKeyState] = useState<MdrTrackKeyState>({});
@@ -1203,8 +1210,10 @@ export default function Home() {
         return response.arrayBuffer();
       };
       const requestedFormat = /\.mdx(?:$|[?#])/i.test(mdrUrl) ? "mdx" : "mdr";
-      const source = await fetchBinary(mdrUrl.trim(), requestedFormat);
-      const pdx = pdxUrl?.trim() ? await fetchBinary(pdxUrl.trim(), "pdx") : undefined;
+      const [source, pdx] = await Promise.all([
+        fetchBinary(mdrUrl.trim(), requestedFormat),
+        pdxUrl?.trim() ? fetchBinary(pdxUrl.trim(), "pdx") : undefined,
+      ]);
       const detected = inspectMadrvSource(source);
       const title = detected.info.title.trim() || label?.trim() || `REMOTE ${detected.format.toUpperCase()}`;
       if (detected.format === "mdr") {
@@ -1862,9 +1871,9 @@ export default function Home() {
                 <p data-testid="playback-notice" className="mono m-0 border-l-2 border-primary/60 bg-primary/[0.045] px-3 py-2 text-[10px] leading-5 text-[#dfe1d8]">{notice}</p>
               </div>
               <div className="grid border-t border-white/10 md:grid-cols-2">{engineRows.map((engine) => { const [level, setLevel] = activeLevels[engine.id]; return <div className="border-b border-white/10 p-4 last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0" key={engine.id}><div className="flex items-center justify-between"><div><span className="mono text-[10px] font-medium tracking-[0.14em] text-[#f5f4ec]">{engine.label}</span><p className="mono m-0 mt-1 text-[9px] uppercase tracking-[0.1em] text-[#8b9085]">{engine.id === "opm" ? "YM2151 + PDX unified level" : "Output level"}</p></div><span className="mono text-[10px] text-[#a9aca2]">{level}%</span></div><input type="range" min="0" max="100" value={level} onChange={(event) => { const value = Number(event.target.value); if (engine.id === "opm") { setOpmLevel(value); setPcmLevel(value); audio().setLevel("opm", value); audio().setLevel("pcm", value); } else { setLevel(value); audio().setLevel("midi", value); } }} className="range-control mt-2" aria-label={`${engine.label}の出力レベル`} /></div>})}</div>
-              {mixerTracks.some((track) => track.active) && <div data-testid="track-key-overview" className="border-t border-white/10 bg-[#11120f] p-4 sm:p-5"><div className="flex items-end justify-between gap-3"><div><SmallLabel>Live keyboard / all channels</SmallLabel><p className="mono m-0 mt-1 text-[9px] leading-4 text-[#a9aca2]">OPM／MIDIは現在音、PCMはPADの HIT／AWAIT／MUTED を一覧します。鍵盤は下の Track matrix（OPM／MIDI）です。</p></div><span className="mono shrink-0 text-[9px] text-primary">{mixerTracks.filter((track) => track.active).length} TRACKS</span></div><ChannelNoteState tracks={mixerTracks.filter((track) => track.active)} trackKeyState={trackKeyState} mutedTracks={mutedTracks} pcmActivityMask={pcmActivityMask} /></div>}
+              {activeMixerTracks.length > 0 && <div data-testid="track-key-overview" className="border-t border-white/10 bg-[#11120f] p-4 sm:p-5"><div className="flex items-end justify-between gap-3"><div><SmallLabel>Live keyboard / all channels</SmallLabel><p className="mono m-0 mt-1 text-[9px] leading-4 text-[#a9aca2]">OPM／MIDIは現在音、PCMはPADの HIT／AWAIT／MUTED を一覧します。鍵盤は下の Track matrix（OPM／MIDI）です。</p></div><span className="mono shrink-0 text-[9px] text-primary">{activeMixerTracks.length} TRACKS</span></div><ChannelNoteState tracks={activeMixerTracks} trackKeyState={trackKeyState} mutedTracks={mutedTracks} pcmActivityMask={pcmActivityMask} /></div>}
             </section>
-            {mixerTracks.some((track) => track.active) && <section className="console-panel panel-notch-muted playback-heavy-section order-3 relative mt-4 border border-white/15 bg-[#191b16] p-3 sm:p-4">
+            {activeMixerTracks.length > 0 && <section className="console-panel panel-notch-muted playback-heavy-section order-3 relative mt-4 border border-white/15 bg-[#191b16] p-3 sm:p-4">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1"><SmallLabel>Track matrix / MDR & MDX mixer</SmallLabel><span className="mono text-[9px] text-[#a9aca2]">C0–B7 · OPM / MIDI · PCM mute</span></div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -1872,13 +1881,13 @@ export default function Home() {
                     <button type="button" aria-pressed={keyboardMatrixMode === "tracks"} onClick={() => setKeyboardMatrixMode("tracks")} className={`mono px-2.5 py-1 text-[8px] uppercase tracking-[0.08em] ${keyboardMatrixMode === "tracks" ? "bg-primary text-primary-foreground" : "text-[#a9aca2] hover:text-primary"}`}>All tracks</button>
                     <button type="button" aria-pressed={keyboardMatrixMode === "engines"} onClick={() => setKeyboardMatrixMode("engines")} className={`mono border-l border-white/20 px-2.5 py-1 text-[8px] uppercase tracking-[0.08em] ${keyboardMatrixMode === "engines" ? "bg-primary text-primary-foreground" : "text-[#a9aca2] hover:text-primary"}`}>OPM / MIDI</button>
                   </div>
-                  <span className="mono text-[9px] text-[#a9aca2]">{mixerTracks.filter((track) => track.active).length} ACTIVE · {mutedTracks.length} MUTED</span>
+                  <span className="mono text-[9px] text-[#a9aca2]">{activeMixerTracks.length} ACTIVE · {mutedTracks.length} MUTED</span>
                 </div>
               </div>
               {keyboardMatrixMode === "engines" ? (
                 <div className="mt-2 flex flex-col gap-1" data-testid="keyboard-matrix-engines">
                   {ENGINE_BUS_ORDER.map((engine) => {
-                    const busTracks = mixerTracks.filter((track) => track.active && track.engine === engine);
+                    const busTracks = mixerTracksByEngine[engine];
                     if (!busTracks.length) return null;
                     const notes = mergeEngineBusNotes(busTracks, trackKeyState, mutedTracks, engine);
                     const meta = ENGINE_BUS_META[engine];
@@ -1896,7 +1905,7 @@ export default function Home() {
                 </div>
               ) : (
                 <div className="mt-2 flex flex-col gap-px bg-white/10" data-testid="keyboard-matrix-tracks">
-                  {mixerTracks.filter((track) => track.active).map((track) => {
+                  {activeMixerTracks.map((track) => {
                     const muted = mutedTracks.includes(track.index);
                     const solo = soloTrack === track.index;
                     const isPad = track.engine === "pcm";
@@ -1938,7 +1947,7 @@ export default function Home() {
           <p className="mono m-0 text-[10px] uppercase tracking-[0.17em] text-[#72776d]">MADRV Player / Signal Deck</p>
         </div>
       </footer>
-      <FormatGuideDialog open={formatGuideOpen} onOpenChange={setFormatGuideOpen} />
+      {formatGuideOpen && <Suspense fallback={<span role="status" className="mono text-xs">ガイドを読み込み中…</span>}><FormatGuideDialog open={formatGuideOpen} onOpenChange={setFormatGuideOpen} /></Suspense>}
     </div>
   );
 }
