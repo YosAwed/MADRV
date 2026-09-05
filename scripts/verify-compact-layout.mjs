@@ -59,6 +59,91 @@ try {
     if ((await toggle(id).getAttribute("aria-expanded")) === "true")
       await toggle(id).click();
   };
+  const assertInViewport = async (locator, label) => {
+    if (!(await locator.isVisible()))
+      throw new Error(`${label} is hidden on the first screen.`);
+    const bounds = await locator.boundingBox();
+    const viewport = page.viewportSize();
+    if (
+      !bounds ||
+      bounds.x < -1 ||
+      bounds.y < -1 ||
+      bounds.x + bounds.width > viewport.width + 1 ||
+      bounds.y + bounds.height > viewport.height + 1
+    )
+      throw new Error(
+        `${label} is outside the first viewport: ${JSON.stringify(bounds)}`
+      );
+    const panelBounds = await locator.evaluate(element => {
+      const panel = element.closest("[data-panel]");
+      if (!panel) return null;
+      const { left, right } = panel.getBoundingClientRect();
+      return { left, right };
+    });
+    if (
+      panelBounds &&
+      (bounds.x < panelBounds.left - 1 ||
+        bounds.x + bounds.width > panelBounds.right + 1)
+    )
+      throw new Error(`${label} overflows its panel.`);
+  };
+  const assertCommonControls = async () => {
+    for (const name of [
+      "LOCAL FILE",
+      "REMOTE URL",
+      "MML SCORE",
+      "Add current",
+      "Prev",
+      "Next",
+      "SoundFont",
+      "External MIDI",
+      "All tracks",
+      "OPM / MIDI",
+      "Copy short link",
+      "Export MP4",
+    ])
+      await assertInViewport(
+        page.getByRole("button", { name, exact: true }),
+        name
+      );
+    for (const name of [
+      "音源ファイルを選択",
+      "再生",
+      "マスター音量",
+      "ループ回数",
+      "無限ループを切り替える",
+    ])
+      await assertInViewport(page.getByLabel(name, { exact: true }), name);
+    await assertInViewport(
+      page.getByTestId("soundfont-bank-button"),
+      "SoundFont bank selection"
+    );
+    const busSliders = await page
+      .getByRole("slider", { name: /の出力レベル$/ })
+      .all();
+    if (busSliders.length !== 2)
+      throw new Error("OPM/PCM and MIDI output sliders are not both exposed.");
+    for (const slider of busSliders)
+      await assertInViewport(slider, await slider.getAttribute("aria-label"));
+    for (const id of ["share", "export"])
+      await assertInViewport(toggle(id), `${id} panel access`);
+  };
+
+  const programDeck = page.getByTestId("program-deck");
+  if ((await programDeck.getByTestId("panel-toggle-matrix").count()) !== 1)
+    throw new Error("Track matrix does not belong to Program Deck.");
+  if (
+    (await toggle("matrix").getAttribute("aria-expanded")) !== "true" ||
+    (await toggle("playlist").getAttribute("aria-expanded")) !== "true"
+  )
+    throw new Error(
+      "Matrix and playlist are not open on a fresh first screen."
+    );
+  await assertCommonControls();
+  await page.screenshot({ path: `${out}/1366-initial.png`, fullPage: true });
+  report.checks.push(
+    "Fresh first screen exposes source, playlist, playback, output and matrix controls; matrix belongs to Program Deck"
+  );
 
   await page.getByRole("button", { name: "MML SCORE", exact: true }).click();
   const mml = "T140 O4 L8 c d e f g a b > c";
@@ -75,15 +160,33 @@ try {
   );
   await open("diagnostics");
   await close("levels");
+  await close("matrix");
+  await close("playlist");
   await page.reload({ waitUntil: "networkidle" });
   if (
     (await toggle("diagnostics").getAttribute("aria-expanded")) !== "true" ||
-    (await toggle("levels").getAttribute("aria-expanded")) !== "false"
+    (await toggle("levels").getAttribute("aria-expanded")) !== "false" ||
+    (await toggle("matrix").getAttribute("aria-expanded")) !== "false" ||
+    (await toggle("playlist").getAttribute("aria-expanded")) !== "false"
   )
     throw new Error("Panel state was not restored.");
   await close("diagnostics");
   await open("levels");
-  report.checks.push("Open and closed states restored on reload");
+  await open("matrix");
+  await open("playlist");
+  await page.getByRole("button", { name: "OPM / MIDI", exact: true }).click();
+  await page.reload({ waitUntil: "networkidle" });
+  if (
+    (await toggle("matrix").getAttribute("aria-expanded")) !== "true" ||
+    (await page
+      .getByRole("button", { name: "OPM / MIDI", exact: true })
+      .getAttribute("aria-pressed")) !== "true"
+  )
+    throw new Error("Open matrix or keyboard mode was not restored.");
+  await page.getByRole("button", { name: "All tracks", exact: true }).click();
+  report.checks.push(
+    "Open/closed panel states and matrix mode restored on reload, including explicit closure of default-open matrix/playlist"
+  );
 
   await close("soundfont");
   await page.getByRole("button", { name: "MML SCORE", exact: true }).click();
@@ -148,6 +251,19 @@ try {
       throw new Error(
         `Default desktop requires scrolling: ${JSON.stringify(measured)}`
       );
+    if (width >= 1366) {
+      await assertCommonControls();
+      await assertInViewport(
+        programDeck
+          .getByRole("button", { name: /のミュートをオンにする$/ })
+          .first(),
+        "First track mute"
+      );
+      await assertInViewport(
+        programDeck.getByRole("button", { name: /をソロにする$/ }).first(),
+        "First track solo"
+      );
+    }
     await page.screenshot({
       path: `${out}/${width}-loaded.png`,
       fullPage: true,
@@ -161,16 +277,58 @@ try {
     timeout: 60000,
   });
   await page.waitForTimeout(1500);
-  if (await page.getByTestId("track-full-keyboard").count())
-    throw new Error("Collapsed matrix still renders keyboards.");
-  await open("matrix");
   if (!(await page.getByTestId("track-full-keyboard").count()))
-    throw new Error("Expanded matrix has no keyboards.");
+    throw new Error("Default-open matrix has no keyboards during playback.");
+  const muteButtons = programDeck.getByRole("button", {
+    name: /のミュートを(?:オン|オフ)にする$/,
+  });
+  const soloButtons = programDeck.getByRole("button", {
+    name: /を(?:ソロ|ソロ解除)にする$/,
+  });
+  const trackCount = await muteButtons.count();
+  if (trackCount < 2)
+    throw new Error("Fixture needs multiple tracks for mute/solo checks.");
+  await muteButtons.first().click();
+  if ((await muteButtons.first().getAttribute("aria-pressed")) !== "true")
+    throw new Error("Track mute did not engage.");
+  await muteButtons.first().click();
+  if ((await muteButtons.first().getAttribute("aria-pressed")) !== "false")
+    throw new Error("Track mute did not release.");
+  await soloButtons.first().click();
+  if (
+    (await soloButtons.first().getAttribute("aria-pressed")) !== "true" ||
+    (await muteButtons.first().getAttribute("aria-pressed")) !== "false" ||
+    (await programDeck
+      .getByRole("button", { name: /のミュートをオフにする$/ })
+      .count()) !==
+      trackCount - 1
+  )
+    throw new Error("Track solo did not mute exactly the other tracks.");
+  await soloButtons.first().click();
+  if (
+    (await soloButtons.first().getAttribute("aria-pressed")) !== "false" ||
+    (await programDeck
+      .getByRole("button", { name: /のミュートをオフにする$/ })
+      .count()) !== 0
+  )
+    throw new Error("Solo release did not restore all tracks.");
+  await muteButtons.last().click();
+  if ((await muteButtons.last().getAttribute("aria-pressed")) !== "true")
+    throw new Error(
+      "Last track mute is not reachable in the scrolling matrix."
+    );
+  await muteButtons.last().click();
+  report.checks.push(
+    `${trackCount} tracks reachable inside Program Deck; mute/unmute and solo/release work during playback`
+  );
   await page.getByRole("button", { name: "OPM / MIDI", exact: true }).click();
   await page.getByTestId("keyboard-matrix-engines").waitFor();
   await close("matrix");
   if (await page.getByTestId("track-full-keyboard").count())
     throw new Error("Matrix did not unmount.");
+  await open("matrix");
+  await page.getByTestId("keyboard-matrix-engines").waitFor();
+  await close("matrix");
   await open("activity");
   await page.getByTestId("channel-note-state").waitFor();
   await close("activity");

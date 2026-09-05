@@ -1,0 +1,153 @@
+{
+  "version": "a32389da-4ec0-4cff-852a-7a42d850f132",
+  "localLayout": {
+    "baseUrl": "http://127.0.0.1:4173",
+    "viewports": [
+      {
+        "width": 1366,
+        "height": 768,
+        "scrollHeight": 768,
+        "scrollWidth": 1366,
+        "transportBottom": 272.171875,
+        "mainBottom": 752.171875
+      },
+      {
+        "width": 1440,
+        "height": 900,
+        "scrollHeight": 900,
+        "scrollWidth": 1440,
+        "transportBottom": 272.171875,
+        "mainBottom": 884.171875
+      },
+      {
+        "width": 1920,
+        "height": 1080,
+        "scrollHeight": 1080,
+        "scrollWidth": 1920,
+        "transportBottom": 254.78125,
+        "mainBottom": 1046.78125
+      },
+      {
+        "width": 960,
+        "height": 740,
+        "scrollHeight": 1037,
+        "scrollWidth": 960,
+        "transportBottom": 272.171875,
+        "mainBottom": 1037.171875
+      },
+      {
+        "width": 390,
+        "height": 844,
+        "scrollHeight": 2056,
+        "scrollWidth": 390,
+        "transportBottom": 325.0625,
+        "mainBottom": 2056.0625
+      }
+    ],
+    "checks": [
+      "Fresh first screen exposes source, playlist, playback, output and matrix controls; matrix belongs to Program Deck",
+      "MML retained across unmount; keyboard Enter toggles panel",
+      "Open/closed panel states and matrix mode restored on reload, including explicit closure of default-open matrix/playlist",
+      "Missing MIDI bank reveals and focuses a persisted closed SoundFont panel",
+      "30 tracks reachable inside Program Deck; mute/unmute and solo/release work during playback",
+      "30-track hardware + built-in MIDI playback; folding source/SoundFont/matrix during playback; stop",
+      "Expanded 10 panels; playlist add, remote inputs/catalog, MML and format guide accessible"
+    ],
+    "audio": {
+      "callbacks": 13,
+      "peak": 0.164459228515625
+    },
+    "errors": []
+  },
+  "productionLayout": {
+    "baseUrl": "https://madrv-player.madrv-player-web.workers.dev",
+    "viewports": [
+      {
+        "width": 1366,
+        "height": 768,
+        "scrollHeight": 768,
+        "scrollWidth": 1366,
+        "transportBottom": 272.171875,
+        "mainBottom": 752.171875
+      },
+      {
+        "width": 1440,
+        "height": 900,
+        "scrollHeight": 900,
+        "scrollWidth": 1440,
+        "transportBottom": 272.171875,
+        "mainBottom": 884.171875
+      },
+      {
+        "width": 1920,
+        "height": 1080,
+        "scrollHeight": 1080,
+        "scrollWidth": 1920,
+        "transportBottom": 254.78125,
+        "mainBottom": 1046.78125
+      },
+      {
+        "width": 960,
+        "height": 740,
+        "scrollHeight": 1037,
+        "scrollWidth": 960,
+        "transportBottom": 272.171875,
+        "mainBottom": 1037.171875
+      },
+      {
+        "width": 390,
+        "height": 844,
+        "scrollHeight": 2056,
+        "scrollWidth": 390,
+        "transportBottom": 325.0625,
+        "mainBottom": 2056.0625
+      }
+    ],
+    "checks": [
+      "Fresh first screen exposes source, playlist, playback, output and matrix controls; matrix belongs to Program Deck",
+      "MML retained across unmount; keyboard Enter toggles panel",
+      "Open/closed panel states and matrix mode restored on reload, including explicit closure of default-open matrix/playlist",
+      "Missing MIDI bank reveals and focuses a persisted closed SoundFont panel",
+      "30 tracks reachable inside Program Deck; mute/unmute and solo/release work during playback",
+      "30-track hardware + built-in MIDI playback; folding source/SoundFont/matrix during playback; stop",
+      "Expanded 10 panels; playlist add, remote inputs/catalog, MML and format guide accessible"
+    ],
+    "audio": {
+      "callbacks": 12,
+      "peak": 0.144866943359375
+    },
+    "errors": []
+  },
+  "productionHelp": {
+    "baseUrl": "https://madrv-player.madrv-player-web.workers.dev",
+    "checks": [
+      {
+        "touch": false,
+        "helpers": 18,
+        "tooltipBounds": {
+          "x": 938,
+          "y": 123,
+          "width": 416,
+          "height": 109.5
+        },
+        "defaultHidden": true,
+        "layoutStable": true,
+        "noticesVisible": true
+      },
+      {
+        "touch": true,
+        "helpers": 18,
+        "tooltipBounds": {
+          "x": 12,
+          "y": 313,
+          "width": 366,
+          "height": 129
+        },
+        "defaultHidden": true,
+        "layoutStable": true,
+        "noticesVisible": true
+      }
+    ],
+    "errors": []
+  }
+}
