@@ -86,12 +86,13 @@ async function run(song) {
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.waitForFunction(() => window.SignalDeckAudio);
     const info = await page.evaluate(
-      async ({ song, sf, pdx }) => {
+      async ({ song, sf, pdx, profile }) => {
         const binary = async name =>
           (
             await fetch("/sample?name=" + encodeURIComponent(name))
           ).arrayBuffer();
         const audio = new window.SignalDeckAudio();
+        audio.setPerformanceProfile(profile);
         window.audio = audio;
         await audio.loadSoundFontData(await binary(sf));
         const state = { sent: [], samples: [], ended: false };
@@ -156,6 +157,7 @@ async function run(song) {
         song,
         sf: names.find(n => /\.sf2$/i.test(n)),
         pdx: names.find(n => n.toLowerCase() === song.pdx.toLowerCase()),
+        profile: process.env.PERFORMANCE_PROFILE ?? "desktop",
       }
     );
     console.log(JSON.stringify({ phase: "started", name: song.name, ...info }));

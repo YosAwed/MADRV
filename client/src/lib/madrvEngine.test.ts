@@ -502,6 +502,13 @@ describe("playback load advisor", () => {
     expect(recommendPlaybackTuning({ sourceBytes: 800_000, pcmBytes: 0, hardwareTracks: 8, midiTracks: 2, benchmarkMs: 15, frameP95Ms: 20, hardwareConcurrency: 4, deviceMemoryGb: 4, mobile: false })).toMatchObject({ preset: "standard" });
     expect(recommendPlaybackTuning({ sourceBytes: 200_000, pcmBytes: 0, hardwareTracks: 4, midiTracks: 0, benchmarkMs: 6, frameP95Ms: 12, hardwareConcurrency: 8, deviceMemoryGb: 16, mobile: false })).toMatchObject({ preset: "low-latency" });
   });
+
+  it("gives a small, full hybrid score extra buffer headroom when using the built-in SoundFont", () => {
+    const probe = { sourceBytes: 7400, pcmBytes: 37000, hardwareTracks: 15, midiTracks: 15, benchmarkMs: 1, frameP95Ms: 16.7, hardwareConcurrency: 8, deviceMemoryGb: 16, mobile: false };
+    expect(recommendPlaybackTuning({ ...probe, soundFont: true })).toMatchObject({ preset: "stable" });
+    expect(recommendPlaybackTuning({ ...probe, soundFont: false })).toMatchObject({ preset: "standard" });
+    expect(recommendPlaybackTuning({ ...probe, hardwareTracks: 8, midiTracks: 2, soundFont: true })).toMatchObject({ preset: "low-latency" });
+  });
 });
 
 describe("MDR playback duration", () => {

@@ -1,0 +1,270 @@
+{
+  "measurements": {
+    "before": {
+      "root": "/tmp/madrv-hybrid-baseline/public",
+      "source": "/Users/awed/MDRSAMPLE/MJ_RUMI_SC.MDR",
+      "rate": 6,
+      "durationMs": 15000,
+      "preset": "low-latency",
+      "loaded": "あにま～じゃんV3(C)SOGNA - Message From RUMI - Feat.くりんぱ / AVG-FOE.を読込みました。OPM／PDX 15トラック、GS MIDI 15トラックを検出。 PDXペアを使用できます。",
+      "notice": "MDR / OPM + PDXをWebAssemblyで無限ループ再生中です。停止ボタンで終了します。",
+      "callbacks": 352,
+      "bufferBudgetMs": 42.666666666666664,
+      "callbackGapP95Ms": 45.400000005960464,
+      "callbackGapMaxMs": 53.3999999910593,
+      "callbackRenderP95Ms": 3,
+      "lateCallbacks": 0,
+      "longTasks": 0,
+      "longTaskTotalMs": 0,
+      "mutations": 65725,
+      "peak": 0.143829345703125,
+      "warnings": [],
+      "errors": []
+    },
+    "after6x": {
+      "root": "/Users/awed/MADRVWEB/dist/public",
+      "source": "/Users/awed/MDRSAMPLE/MJ_RUMI_SC.MDR",
+      "rate": 6,
+      "durationMs": 15000,
+      "preset": "low-latency",
+      "loaded": "あにま～じゃんV3(C)SOGNA - Message From RUMI - Feat.くりんぱ / AVG-FOE.を読込みました。OPM／PDX 15トラック、GS MIDI 15トラックを検出。 PDXペアを使用できます。",
+      "notice": "MDR / OPM + PDXをWebAssemblyで無限ループ再生中です。停止ボタンで終了します。",
+      "callbacks": 352,
+      "bufferBudgetMs": 42.666666666666664,
+      "callbackGapP95Ms": 45.1000000089407,
+      "callbackGapMaxMs": 48.29999999701977,
+      "callbackRenderP95Ms": 3.1000000089406967,
+      "lateCallbacks": 0,
+      "longTasks": 0,
+      "longTaskTotalMs": 0,
+      "mutations": 55359,
+      "peak": 0.143829345703125,
+      "warnings": [
+        "[MADRV audio] OPM callback late: 87.9 ms (budget 42.7 ms)",
+        "[MADRV audio] OPM callback late: 113.1 ms (budget 42.7 ms)"
+      ],
+      "errors": []
+    },
+    "before20x": {
+      "root": "/tmp/madrv-hybrid-baseline/public",
+      "source": "/Users/awed/MDRSAMPLE/MJ_RUMI_SC.MDR",
+      "rate": 20,
+      "durationMs": 15000,
+      "preset": "low-latency",
+      "loaded": "あにま～じゃんV3(C)SOGNA - Message From RUMI - Feat.くりんぱ / AVG-FOE.を読込みました。OPM／PDX 15トラック、GS MIDI 15トラックを検出。 PDXペアを使用できます。",
+      "notice": "MDR / OPM + PDXをWebAssemblyで無限ループ再生中です。停止ボタンで終了します。",
+      "callbacks": 351,
+      "bufferBudgetMs": 42.666666666666664,
+      "callbackGapP95Ms": 65.59999999403954,
+      "callbackGapMaxMs": 166.79999999701977,
+      "callbackRenderP95Ms": 11.700000002980232,
+      "lateCallbacks": 3,
+      "longTasks": 3,
+      "longTaskTotalMs": 205,
+      "mutations": 19562,
+      "peak": 0.143829345703125,
+      "warnings": [
+        "[MADRV audio] OPM callback late: 163.6 ms (budget 42.7 ms)",
+        "[MADRV audio] OPM callback late: 122.5 ms (budget 42.7 ms)",
+        "[MADRV audio] OPM callback late: 169.0 ms (budget 42.7 ms)"
+      ],
+      "errors": []
+    },
+    "after20x": {
+      "root": "/Users/awed/MADRVWEB/dist/public",
+      "source": "/Users/awed/MDRSAMPLE/MJ_RUMI_SC.MDR",
+      "rate": 20,
+      "durationMs": 15000,
+      "preset": "low-latency",
+      "loaded": "あにま～じゃんV3(C)SOGNA - Message From RUMI - Feat.くりんぱ / AVG-FOE.を読込みました。OPM／PDX 15トラック、GS MIDI 15トラックを検出。 PDXペアを使用できます。",
+      "notice": "MDR / OPM + PDXをWebAssemblyで無限ループ再生中です。停止ボタンで終了します。",
+      "callbacks": 353,
+      "bufferBudgetMs": 42.666666666666664,
+      "callbackGapP95Ms": 68.59999999403954,
+      "callbackGapMaxMs": 95,
+      "callbackRenderP95Ms": 13.900000005960464,
+      "lateCallbacks": 3,
+      "longTasks": 1,
+      "longTaskTotalMs": 50,
+      "mutations": 14208,
+      "peak": 0.143829345703125,
+      "warnings": [
+        "[MADRV audio] OPM callback late: 102.3 ms (budget 42.7 ms)",
+        "[MADRV audio] OPM callback late: 77.9 ms (budget 42.7 ms)",
+        "[MADRV audio] OPM callback late: 80.4 ms (budget 42.7 ms)",
+        "[MADRV audio] OPM callback late: 85.9 ms (budget 42.7 ms)",
+        "[MADRV audio] OPM callback late: 177.5 ms (budget 42.7 ms)"
+      ],
+      "errors": []
+    },
+    "auto20x": {
+      "root": "/Users/awed/MADRVWEB/dist/public",
+      "source": "/Users/awed/MDRSAMPLE/MJ_RUMI_SC.MDR",
+      "rate": 20,
+      "durationMs": 90000,
+      "preset": "auto",
+      "loaded": "あにま～じゃんV3(C)SOGNA - Message From RUMI - Feat.くりんぱ / AVG-FOE.を読込みました。OPM／PDX 15トラック、GS MIDI 15トラックを検出。 PDXペアを使用できます。",
+      "notice": "MDR / OPM + PDXをWebAssemblyで無限ループ再生中です。停止ボタンで終了します。",
+      "advisor": "Playback advisor推奨: 安定優先 / 負荷 100 / 100auto · 安定優先OPM／PCMと内蔵SoundFontの多数トラックを同時再生するため、安定優先を推奨します。操作への応答は遅くなりますが、音声バッファの余裕を増やします。Asset0.04 MiBProbe4.5 msFrame p95176.8 ms推奨を適用低遅延標準安定優先設定は次回の再生開始時に反映されます。安定優先は大きい音声バッファと更新間引き、低遅延は小さいバッファを使用します。",
+      "callbacks": 264,
+      "bufferBudgetMs": 341.3333333333333,
+      "callbackGapP95Ms": 367.5,
+      "callbackGapMaxMs": 389.70000000298023,
+      "callbackRenderP95Ms": 73.59999999403954,
+      "lateCallbacks": 0,
+      "longTasks": 262,
+      "longTaskTotalMs": 16860,
+      "mutations": 52207,
+      "peak": 0.171417236328125,
+      "warnings": [],
+      "errors": []
+    },
+    "advisor": {
+      "root": "/Users/awed/MADRVWEB/dist/public",
+      "source": "/Users/awed/MDRSAMPLE/MJ_RUMI_SC.MDR",
+      "rate": 1,
+      "durationMs": 3000,
+      "preset": "auto",
+      "loaded": "あにま～じゃんV3(C)SOGNA - Message From RUMI - Feat.くりんぱ / AVG-FOE.を読込みました。OPM／PDX 15トラック、GS MIDI 15トラックを検出。 PDXペアを使用できます。",
+      "notice": "プレイリスト 1 / 1「あにま～じゃんV3(C)SOGNA - Message From RUMI - Feat.くりんぱ / AVG-FOE.」を2回ループで再生中です。",
+      "advisor": "Playback advisor推奨: 安定優先 / 負荷 58 / 100auto · 安定優先OPM／PCMと内蔵SoundFontの多数トラックを同時再生するため、安定優先を推奨します。操作への応答は遅くなりますが、音声バッファの余裕を増やします。Asset0.04 MiBProbe0.2 msFrame p9512.8 ms推奨を適用低遅延標準安定優先設定は次回の再生開始時に反映されます。安定優先は大きい音声バッファと更新間引き、低遅延は小さいバッファを使用します。",
+      "advisorChecks": {
+        "destinationSwitch": true,
+        "playlistBuffer": 16384,
+        "manualBuffer": 2048
+      },
+      "callbacks": 9,
+      "bufferBudgetMs": 341.3333333333333,
+      "callbackGapP95Ms": 341.70000000298023,
+      "callbackGapMaxMs": 344.29999999701977,
+      "callbackRenderP95Ms": 12.200000002980232,
+      "lateCallbacks": 0,
+      "longTasks": 0,
+      "longTaskTotalMs": 0,
+      "mutations": 2368,
+      "peak": 0.134796142578125,
+      "warnings": [],
+      "errors": []
+    }
+  },
+  "loops": [
+    {
+      "name": "MJ_RUMI_SC.MDR",
+      "info": {
+        "duration": 1200.015,
+        "format": "MDR / OPM + PDX",
+        "startsAt": 0.641,
+        "loopWindow": {
+          "startSeconds": 41.118,
+          "endSeconds": 80.418
+        },
+        "eventCount": 5500
+      },
+      "initialOpmPeak": 0.1183154284954071,
+      "observedSeconds": 123.71800000000002,
+      "boundaries": [
+        {
+          "at": 80.418,
+          "opmPeak": 0.1239834576845169,
+          "midiPeak": 0.2985750734806061,
+          "midiNoteOns": 107,
+          "firstNoteDelay": 0.004666666666651054,
+          "samples": 80,
+          "hardwareBefore": 79527,
+          "hardwareAfter": 83623
+        },
+        {
+          "at": 119.71800000000002,
+          "opmPeak": 0.12494689226150513,
+          "midiPeak": 0.2930111587047577,
+          "midiNoteOns": 99,
+          "firstNoteDelay": 0.14441666666664332,
+          "samples": 80,
+          "hardwareBefore": 118784,
+          "hardwareAfter": 122880
+        }
+      ],
+      "ended": false,
+      "errors": [],
+      "status": "pass"
+    },
+    {
+      "name": "PRIN_GS.MDR",
+      "info": {
+        "duration": 113.142,
+        "format": "MDR / OPM + PDX",
+        "startsAt": 0.5663333333333334,
+        "loopWindow": {
+          "startSeconds": 55.95,
+          "endSeconds": 111.642
+        },
+        "eventCount": 4064
+      },
+      "initialOpmPeak": 0.3657943606376648,
+      "observedSeconds": 171.334,
+      "boundaries": [
+        {
+          "at": 111.642,
+          "opmPeak": 0.3653939962387085,
+          "midiPeak": 0.37186750769615173,
+          "midiNoteOns": 56,
+          "firstNoteDelay": 0.028999999999996362,
+          "samples": 80,
+          "hardwareBefore": 110919,
+          "hardwareAfter": 114679
+        },
+        {
+          "at": 167.334,
+          "opmPeak": 0.3670455813407898,
+          "midiPeak": 0.3992156386375427,
+          "midiNoteOns": 56,
+          "firstNoteDelay": 0.017333333333340306,
+          "samples": 80,
+          "hardwareBefore": 166560,
+          "hardwareAfter": 170652
+        }
+      ],
+      "ended": false,
+      "errors": [],
+      "status": "pass"
+    }
+  ],
+  "portamento": [
+    {
+      "atMs": 6000,
+      "pitchWheel": 8192
+    },
+    {
+      "atMs": 19000,
+      "pitchWheel": 8192
+    },
+    {
+      "atMs": 32000,
+      "pitchWheel": 8192
+    }
+  ],
+  "production": {
+    "root": "/Users/awed/MADRVWEB/dist/public",
+    "source": "/Users/awed/MDRSAMPLE/MJ_RUMI_SC.MDR",
+    "rate": 4,
+    "durationMs": 6000,
+    "preset": "auto",
+    "loaded": "あにま～じゃんV3(C)SOGNA - Message From RUMI - Feat.くりんぱ / AVG-FOE.を読込みました。OPM／PDX 15トラック、GS MIDI 15トラックを検出。 PDXペアを使用できます。",
+    "notice": "MDR / OPM + PDXをWebAssemblyで無限ループ再生中です。停止ボタンで終了します。",
+    "advisor": "Playback advisor推奨: 安定優先 / 負荷 58 / 100auto · 安定優先OPM／PCMと内蔵SoundFontの多数トラックを同時再生するため、安定優先を推奨します。操作への応答は遅くなりますが、音声バッファの余裕を増やします。Asset0.04 MiBProbe1.2 msFrame p9526.7 ms推奨を適用低遅延標準安定優先設定は次回の再生開始時に反映されます。安定優先は大きい音声バッファと更新間引き、低遅延は小さいバッファを使用します。",
+    "callbacks": 17,
+    "bufferBudgetMs": 341.3333333333333,
+    "callbackGapP95Ms": 342.59999999403954,
+    "callbackGapMaxMs": 343.30000001192093,
+    "callbackRenderP95Ms": 12.300000011920929,
+    "lateCallbacks": 0,
+    "longTasks": 0,
+    "longTaskTotalMs": 0,
+    "mutations": 4221,
+    "peak": 0.143829345703125,
+    "warnings": [],
+    "errors": [],
+    "baseUrl": "https://madrv-player.madrv-player-web.workers.dev",
+    "deploymentVersion": "be9071f7-5ec7-4a4a-8853-7e89f334a7a0"
+  }
+}

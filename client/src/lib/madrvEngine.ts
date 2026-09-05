@@ -20,6 +20,7 @@ export type PlaybackLoadProbe = {
   hardwareConcurrency?: number;
   deviceMemoryGb?: number;
   mobile: boolean;
+  soundFont?: boolean;
 };
 
 export type PlaybackTuningRecommendation = {
@@ -28,6 +29,11 @@ export type PlaybackTuningRecommendation = {
   reason: string;
 };
 
+/** Dense hybrid scores need headroom even when their compressed source is tiny. */
+export function requiresStableMadrvProfileForHybridTracks(hardwareTracks: number, midiTracks: number, soundFont: boolean): boolean {
+  return soundFont && hardwareTracks >= 8 && midiTracks >= 8 && hardwareTracks + midiTracks >= 24;
+}
+
 /** Chooses a safe audio-buffer profile from a quick browser-local load probe. */
 export function recommendPlaybackTuning(probe: PlaybackLoadProbe): PlaybackTuningRecommendation {
   const assetMiB = Math.max(0, probe.sourceBytes + probe.pcmBytes) / (1024 * 1024);
@@ -35,7 +41,13 @@ export function recommendPlaybackTuning(probe: PlaybackLoadProbe): PlaybackTunin
   const framePenalty = Math.max(0, probe.frameP95Ms - 20) * 1.1;
   const corePenalty = probe.hardwareConcurrency !== undefined && probe.hardwareConcurrency <= 2 ? 22 : probe.hardwareConcurrency !== undefined && probe.hardwareConcurrency <= 4 ? 8 : 0;
   const memoryPenalty = probe.deviceMemoryGb !== undefined && probe.deviceMemoryGb <= 2 ? 18 : probe.deviceMemoryGb !== undefined && probe.deviceMemoryGb <= 4 ? 6 : 0;
-  const score = Math.round(Math.min(100, assetMiB * 1.5 + probe.hardwareTracks * 1.7 + probe.midiTracks * 0.9 + (probe.mobile ? 14 : 0) + benchmarkPenalty + framePenalty + corePenalty + memoryPenalty));
+  // A small MDR can still run almost every OPM/PCM and SoundFont part. The
+  // byte-scan probe does not measure that sustained synthesis + UI workload.
+  const denseHybrid = requiresStableMadrvProfileForHybridTracks(probe.hardwareTracks, probe.midiTracks, probe.soundFont === true);
+  const score = Math.round(Math.min(100, Math.max(denseHybrid ? 58 : 0, assetMiB * 1.5 + probe.hardwareTracks * 1.7 + probe.midiTracks * 0.9 + (probe.mobile ? 14 : 0) + benchmarkPenalty + framePenalty + corePenalty + memoryPenalty)));
+  if (denseHybrid) {
+    return { preset: "stable", score, reason: "OPM／PCMと内蔵SoundFontの多数トラックを同時再生するため、安定優先を推奨します。操作への応答は遅くなりますが、音声バッファの余裕を増やします。" };
+  }
   if (score >= 58 || probe.benchmarkMs >= 34 || probe.frameP95Ms >= 45) {
     return { preset: "stable", score, reason: "端末余力または楽曲負荷が高いため、大きい音声バッファと更新間引きを推奨します。" };
   }
@@ -1731,6 +1743,10 @@ export class SignalDeckAudio {
   private reportedTimerB: number | null = null;
   private mutedMdrTracks = new Set<number>();
   private mdrTrackKeys: MdrTrackKeyState = {};
+  private mdrHardwareTrackIndexes: number[] = [];
+  private publishedMdrTrackKeys: MdrTrackKeyState = {};
+  private trackKeyPublishTimer?: number;
+  private lastTrackKeyPublishAt = Number.NEGATIVE_INFINITY;
   private performanceProfile: PlaybackPerformanceProfile = "desktop";
   private safariCompatibilityMode = false;
   private lastProgressUpdateAt = Number.NEGATIVE_INFINITY;
@@ -1862,8 +1878,8 @@ export class SignalDeckAudio {
   private reportHardwareTrackKeysFromRaw(rawNotes: unknown) {
     if (!Array.isArray(rawNotes)) return;
     let next: MdrTrackKeyState | undefined;
-    const trackCount = Math.min(32, rawNotes.length);
-    for (let track = 0; track < trackCount; track += 1) {
+    for (const track of this.mdrHardwareTrackIndexes) {
+      if (track >= rawNotes.length) continue;
       const midiNote = mxdrvRawNoteToMidiNote(Number(rawNotes[track]));
       const current = this.mdrTrackKeys[track];
       if (midiNote === null) {
@@ -1986,7 +2002,7 @@ export class SignalDeckAudio {
 
   setMdrTrackKeyListener(listener: ((state: MdrTrackKeyState) => void) | undefined) {
     this.mdrTrackKeyListener = listener;
-    this.publishMdrTrackKeys();
+    this.publishMdrTrackKeys(true);
   }
 
   setTimerBListener(listener: ((value: number | null) => void) | undefined) {
@@ -2022,22 +2038,51 @@ export class SignalDeckAudio {
     this.hardwarePlaybackPositionListener?.(milliseconds);
   }
 
-  private publishMdrTrackKeys() {
-    const visible = Object.fromEntries(Object.entries(this.mdrTrackKeys)
-      .filter(([track]) => !this.mutedMdrTracks.has(Number(track)))
-      .map(([track, pitches]) => [track, [...pitches]]));
-    this.mdrTrackKeyListener?.(visible);
+  private publishMdrTrackKeys(force = false) {
+    if (force || !this.mdrTrackKeyListener) {
+      if (this.trackKeyPublishTimer !== undefined) window.clearTimeout(this.trackKeyPublishTimer);
+      this.trackKeyPublishTimer = undefined;
+    }
+    if (!this.mdrTrackKeyListener) return;
+    const now = performance.now();
+    const remainingMs = resolveRealtimeVisualUpdateIntervalMs(this.performanceProfile, this.safariCompatibilityMode) - (now - this.lastTrackKeyPublishAt);
+    if (!force && remainingMs > 0) {
+      if (this.trackKeyPublishTimer === undefined) {
+        this.trackKeyPublishTimer = window.setTimeout(() => {
+          this.trackKeyPublishTimer = undefined;
+          this.publishMdrTrackKeys();
+        }, remainingMs);
+      }
+      return;
+    }
+    if (this.trackKeyPublishTimer !== undefined) window.clearTimeout(this.trackKeyPublishTimer);
+    this.trackKeyPublishTimer = undefined;
+    // Notes are replaced, never mutated. Retain each unchanged array so the
+    // memoized keyboards only render tracks whose visible notes changed.
+    const visible: MdrTrackKeyState = {};
+    for (const [track, pitches] of Object.entries(this.mdrTrackKeys)) {
+      const index = Number(track);
+      if (this.mutedMdrTracks.has(index)) continue;
+      const previous = this.publishedMdrTrackKeys[index];
+      visible[index] = previous?.length === pitches.length && previous.every((note, i) => note === pitches[i]) ? previous : pitches;
+    }
+    const changed = Object.keys(visible).length !== Object.keys(this.publishedMdrTrackKeys).length
+      || Object.entries(visible).some(([track, pitches]) => pitches !== this.publishedMdrTrackKeys[Number(track)]);
+    this.lastTrackKeyPublishAt = now;
+    if (!force && !changed) return;
+    this.publishedMdrTrackKeys = visible;
+    this.mdrTrackKeyListener(visible);
   }
 
   private resetMdrTrackKeys() {
     this.mdrTrackKeys = {};
-    this.publishMdrTrackKeys();
+    this.publishMdrTrackKeys(true);
   }
 
   private reportHardwareTrackKeys() {
     if (!this.mdrPlayer) return;
     let next: MdrTrackKeyState | undefined;
-    for (let track = 0; track < 32; track += 1) {
+    for (const track of this.mdrHardwareTrackIndexes) {
       const midiNote = this.mdrPlayer.getHardwareTrackMidiNote(track);
       const current = this.mdrTrackKeys[track];
       if (midiNote === null) {
@@ -2056,8 +2101,13 @@ export class SignalDeckAudio {
   }
 
   private updateMdrMidiTrackKeys(bytes: number[], sourceTrack: number) {
+    const status = bytes[0] & 0xf0;
+    // Controller, bend, patch and SysEx traffic does not change the keyboard.
+    // Never let that traffic schedule React work on the audio callback thread.
+    if (bytes.length < 2 || (status !== 0x80 && status !== 0x90)) return;
     const current = this.mdrTrackKeys[sourceTrack] ?? [];
     const next = updateMidiTrackNotes(current, bytes);
+    if (current.length === next.length && current.every((note, index) => note === next[index])) return;
     if (next.length) this.mdrTrackKeys[sourceTrack] = next;
     else delete this.mdrTrackKeys[sourceTrack];
     this.publishMdrTrackKeys();
@@ -2073,7 +2123,7 @@ export class SignalDeckAudio {
     // emit the same score again and eventually phase against the first.
     this.mdrPlayer?.setChannelMask(hardwareMask);
     this.mdrWorklet?.port.postMessage({ type: "channel-mask", mask: hardwareMask });
-    this.publishMdrTrackKeys();
+    this.publishMdrTrackKeys(true);
   }
 
   private addDiagnostic(label: string, bytes: number[], status: MidiDiagnosticEntry["status"] = "sent") {
@@ -2335,6 +2385,7 @@ export class SignalDeckAudio {
     this.mdrWorklet?.disconnect();
     this.mdrWorklet = undefined;
     this.mdrPlayer?.stop();
+    this.mdrHardwareTrackIndexes = [];
     this.audioCallbackAt.clear();
     this.outputPeakListener?.(0);
     this.resetPcmActivity();
@@ -2393,6 +2444,7 @@ export class SignalDeckAudio {
     throwIfPlaybackSuperseded(playbackGeneration, this.playbackGeneration);
     this.restoreMdrSoundFont();
     const sourceInfo = inspectMdr(mdr);
+    this.mdrHardwareTrackIndexes = listMdrMixerTracks(mdr).filter((track) => track.active && track.engine !== "midi").map((track) => track.index);
     let needsHardwareRenderer = requiresMdrHardwareRenderer(sourceInfo.hardwareTracks);
     if (sourceInfo.midiTracks > 0 && !this.midiOutput && !this.gsLoaded) throw new Error("このMDRにはGS MIDIトラックがあります。SoundFont bankでSF2/DLSを読み込むか、External MIDIを選択してから再生してください。");
     const measuredLoops = loops <= 0 ? 1 : loops;
@@ -2514,6 +2566,7 @@ export class SignalDeckAudio {
 
   async playMdx(mdx: ArrayBuffer, pdx: ArrayBuffer | undefined, loops: number, onProgress: (seconds: number) => void, onEnd: () => void): Promise<MdrPlaybackInfo> {
     this.stop();
+    this.mdrHardwareTrackIndexes = Array.from({ length: 16 }, (_, index) => index);
     const playbackGeneration = this.playbackGeneration;
     const { context, gains } = this.graph;
     await context.resume();

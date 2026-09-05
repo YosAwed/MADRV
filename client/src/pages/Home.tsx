@@ -23,7 +23,7 @@ import {
   Waves,
 } from "lucide-react";
 import { ChangeEvent, DragEvent, lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { compileMml, extractMmlInitialTempo, fetchRemoteCatalog, fetchRemoteSoundFont, fetchSharedSoundFont, formatMidiNoteName, formatPdxFileName, inspectMadrvSource, inspectMdr, inspectMdx, isGoogleDriveShareUrl, isGsMidiEngineArmed, isMidiPlaybackDestinationReady, isOpmPcmEngineArmed, isPcmPdxEngineArmed, isPcmVoiceActive, isSafariBrowserUserAgent, isSignedTimingCorrectionDraft, limitScore, listMdrMixerTracks, mdrRequiresPdx, MdrInfo, MdrMixerTrack, MdxInfo, MidiDiagnosticEntry, MidiOutputDevice, MmlSyntaxError, normalizeExternalMidiAdvanceMs, normalizeRemoteAssetUrl, normalizeSoundFontMdrDelayMs, normalizeSoundFontMdrDelayProfiles, parseRemoteCatalogPayload, playbackProgressPercent, recommendPlaybackTuning, recommendSoundFontMdrDelayMs, RemoteCatalogEntry, requiresStableMadrvProfileForSoundFont, resolveNextPlaylistIndex, resolvePlaylistInterTrackSilenceSeconds, resolveSoundFontMdrDelayProfile, resolveSoundFontMdrTimingComparisonDelay, setSoundFontMdrDelayProfile, SignalDeckAudio, stepSoundFontMdrDelayMs, timerBToEstimatedBpm, updateSoundFontMdrDelayMeasurement, type MdrMidiSyncSnapshot, type MdrTrackKeyState, type PlaybackPerformanceProfile, type PlaybackTuningPreset, type PlaybackTuningRecommendation, type SoundFontMdrDelayMeasurement, type SoundFontMdrDelayProfiles, type SoundFontMdrTimingComparisonMode } from "@/lib/madrvEngine";
+import { compileMml, extractMmlInitialTempo, fetchRemoteCatalog, fetchRemoteSoundFont, fetchSharedSoundFont, formatMidiNoteName, formatPdxFileName, inspectMadrvSource, inspectMdr, inspectMdx, isGoogleDriveShareUrl, isGsMidiEngineArmed, isMidiPlaybackDestinationReady, isOpmPcmEngineArmed, isPcmPdxEngineArmed, isPcmVoiceActive, isSafariBrowserUserAgent, isSignedTimingCorrectionDraft, limitScore, listMdrMixerTracks, mdrRequiresPdx, MdrInfo, MdrMixerTrack, MdxInfo, MidiDiagnosticEntry, MidiOutputDevice, MmlSyntaxError, normalizeExternalMidiAdvanceMs, normalizeRemoteAssetUrl, normalizeSoundFontMdrDelayMs, normalizeSoundFontMdrDelayProfiles, parseRemoteCatalogPayload, playbackProgressPercent, recommendPlaybackTuning, recommendSoundFontMdrDelayMs, RemoteCatalogEntry, requiresStableMadrvProfileForHybridTracks, requiresStableMadrvProfileForSoundFont, resolveNextPlaylistIndex, resolvePlaylistInterTrackSilenceSeconds, resolveSoundFontMdrDelayProfile, resolveSoundFontMdrTimingComparisonDelay, setSoundFontMdrDelayProfile, SignalDeckAudio, stepSoundFontMdrDelayMs, timerBToEstimatedBpm, updateSoundFontMdrDelayMeasurement, type MdrMidiSyncSnapshot, type MdrTrackKeyState, type PlaybackLoadProbe, type PlaybackPerformanceProfile, type PlaybackTuningPreset, type PlaybackTuningRecommendation, type SoundFontMdrDelayMeasurement, type SoundFontMdrDelayProfiles, type SoundFontMdrTimingComparisonMode } from "@/lib/madrvEngine";
 import { DEFAULT_PLAYLIST_LOOP_COUNT, isPersistablePlaylistEntry, movePlaylistEntry, normalizePlaylistLoopCount, parseSavedPlaylist, SAVED_PLAYLIST_STORAGE_KEY, setPlaylistEntryLoopCount, type SavedPlaylistEntry } from "@/lib/playlistEntries";
 import { parseRecentSources, RECENT_SOURCES_STORAGE_KEY, removeRecentSource, upsertRecentSource, type RecentSource } from "@/lib/recentSources";
 import { persistLocalSoundFontSelection, persistRemoteSoundFontSelection, readCachedLocalSoundFont, readPersistedSoundFontSelection } from "@/lib/soundFontStorage";
@@ -80,6 +80,7 @@ function playlistTitleFromUrl(value: string): string {
 
 type LoadDiagnosis = {
   measuring: boolean;
+  probe?: PlaybackLoadProbe;
   recommendation?: PlaybackTuningRecommendation;
   benchmarkMs?: number;
   frameP95Ms?: number;
@@ -423,7 +424,7 @@ export default function Home() {
   const [exportLimit, setExportLimit] = useState(60);
   const [isExporting, setIsExporting] = useState(false);
   const [mmlError, setMmlError] = useState<string | null>(null);
-  const [loadDiagnosis, setLoadDiagnosis] = useState<LoadDiagnosis>({ measuring: false });
+  const [loadDiagnosisState, setLoadDiagnosis] = useState<LoadDiagnosis>({ measuring: false });
   const [tuningPreset, setTuningPresetState] = useState<PlaybackTuningSelection>(() => {
     try { return parsePlaybackTuningPreset(window.localStorage.getItem(PLAYBACK_TUNING_STORAGE_KEY)); } catch { return "auto"; }
   });
@@ -592,14 +593,20 @@ export default function Home() {
     changeSoundFontMdrDelay(soundFontMdrDelayDraft === "" || soundFontMdrDelayDraft === "-" ? 0 : Number(soundFontMdrDelayDraft));
   }
 
+  // Re-evaluate the stored probe when the output destination changes, including
+  // when a source diagnosis completes after that switch.
+  const loadDiagnosis = useMemo<LoadDiagnosis>(() => loadDiagnosisState.probe
+    ? { ...loadDiagnosisState, recommendation: recommendPlaybackTuning({ ...loadDiagnosisState.probe, soundFont: midiOutputMode === "soundfont" }) }
+    : loadDiagnosisState, [loadDiagnosisState, midiOutputMode]);
+
   const activePerformanceProfile = useMemo<PlaybackPerformanceProfile>(() => {
     const preset = tuningPreset === "auto" ? loadDiagnosis.recommendation?.preset ?? "standard" : tuningPreset;
-    if (tuningPreset === "auto" && requiresStableMadrvProfileForSoundFont(soundFontByteLength)) return "mobile";
+    if (tuningPreset === "auto" && (requiresStableMadrvProfileForSoundFont(soundFontByteLength) || requiresStableMadrvProfileForHybridTracks(mdrInfo?.hardwareTracks ?? 0, mdrInfo?.midiTracks ?? 0, midiOutputMode === "soundfont"))) return "mobile";
     if (preset === "stable") return "mobile";
     if (preset === "low-latency") return "desktop";
     if (isSafari) return "mobile";
     return isMobile ? "mobile" : "desktop";
-  }, [isMobile, isSafari, loadDiagnosis.recommendation?.preset, soundFontByteLength, tuningPreset]);
+  }, [isMobile, isSafari, loadDiagnosis.recommendation?.preset, soundFontByteLength, tuningPreset, mdrInfo?.hardwareTracks, mdrInfo?.midiTracks, midiOutputMode]);
   const safariCompatibilityMode = isSafari && tuningPreset !== "low-latency";
   const soundFontMdrDelayRecommendation = useMemo(
     () => recommendSoundFontMdrDelayMs({
@@ -637,9 +644,9 @@ export default function Home() {
     const sortedFrames = [...frameGaps].sort((left, right) => left - right);
     const frameP95Ms = sortedFrames[Math.max(0, Math.floor((sortedFrames.length - 1) * 0.95))] ?? 16.7;
     const device = navigator as Navigator & { deviceMemory?: number };
-    const recommendation = recommendPlaybackTuning({ sourceBytes: source.byteLength, pcmBytes: pdx?.byteLength ?? 0, hardwareTracks, midiTracks, benchmarkMs, frameP95Ms, hardwareConcurrency: navigator.hardwareConcurrency, deviceMemoryGb: device.deviceMemory, mobile: isMobile });
+    const probe: PlaybackLoadProbe = { sourceBytes: source.byteLength, pcmBytes: pdx?.byteLength ?? 0, hardwareTracks, midiTracks, benchmarkMs, frameP95Ms, hardwareConcurrency: navigator.hardwareConcurrency, deviceMemoryGb: device.deviceMemory, mobile: isMobile };
     void checksum;
-    if (requestId === diagnosisRequestRef.current) setLoadDiagnosis({ measuring: false, recommendation, benchmarkMs, frameP95Ms, assetMiB: (source.byteLength + (pdx?.byteLength ?? 0)) / (1024 * 1024) });
+    if (requestId === diagnosisRequestRef.current) setLoadDiagnosis({ measuring: false, probe, benchmarkMs, frameP95Ms, assetMiB: (source.byteLength + (pdx?.byteLength ?? 0)) / (1024 * 1024) });
   }
 
   function resetMdrEstimatedDuration() {
@@ -1398,6 +1405,7 @@ export default function Home() {
         setLocalSourceFormat(entry.format);
         if (entry.format === "mdr") {
           const info = inspectMdr(entry.source);
+          void diagnoseLoadedSource(entry.source, entry.pdx, info.hardwareTracks, info.midiTracks);
           setMdrInfo(info);
           setLocalMdxInfo(null);
           setLocalMdxPdxName("");
@@ -1405,6 +1413,7 @@ export default function Home() {
           resetMdrEstimatedDuration();
         } else {
           const info = inspectMdx(entry.source);
+          void diagnoseLoadedSource(entry.source, entry.pdx, 8, 0);
           setMdrInfo(null);
           setMdrEstimatedDuration(null);
           setLocalMdxInfo(info);
@@ -1427,7 +1436,12 @@ export default function Home() {
       }
       if (requestId !== playlistStartRequestRef.current) return;
       if (!source) throw new Error("プレイリストの曲データを取得できませんでした。");
-      if (!ensureMidiPlaybackDestination(source.format === "mdr" && inspectMdr(source.source).midiTracks > 0)) return;
+      const playbackMdrInfo = source.format === "mdr" ? inspectMdr(source.source) : null;
+      if (!ensureMidiPlaybackDestination((playbackMdrInfo?.midiTracks ?? 0) > 0)) return;
+      // Playlist transitions can start before React applies the new source's
+      // diagnosis. Choose the actual buffer profile before creating its node.
+      const sourceProfile = tuningPreset === "auto" && requiresStableMadrvProfileForHybridTracks(playbackMdrInfo?.hardwareTracks ?? 0, playbackMdrInfo?.midiTracks ?? 0, midiOutputMode === "soundfont") ? "mobile" : activePerformanceProfile;
+      audio().setPerformanceProfile(sourceProfile, safariCompatibilityMode);
       setElapsed(0);
       audio().setMaster(volume);
       audio().setLevel("opm", opmLevel);
@@ -1516,7 +1530,12 @@ export default function Home() {
         if (mode === "local" && localSourceFormat === "mdx" && localMdxPdxName && fileStem(localPdxFileName) !== fileStem(localMdxPdxName)) {
           throw new Error(`このMDXはPDX「${formatPdxFileName(localMdxPdxName)}」を必要とします。現在のPDX「${localPdxFileName || "未選択"}」を入れ替えてください。`);
         }
-        if (!ensureMidiPlaybackDestination(source.format === "mdr" && inspectMdr(source.source).midiTracks > 0)) return;
+        const playbackMdrInfo = source.format === "mdr" ? inspectMdr(source.source) : null;
+        if (!ensureMidiPlaybackDestination((playbackMdrInfo?.midiTracks ?? 0) > 0)) return;
+        // Playlist transitions can start before React applies the new source's
+        // diagnosis. Choose the actual buffer profile before creating its node.
+        const sourceProfile = tuningPreset === "auto" && requiresStableMadrvProfileForHybridTracks(playbackMdrInfo?.hardwareTracks ?? 0, playbackMdrInfo?.midiTracks ?? 0, midiOutputMode === "soundfont") ? "mobile" : activePerformanceProfile;
+        audio().setPerformanceProfile(sourceProfile, safariCompatibilityMode);
         setElapsed(0);
         audio().setMaster(volume);
         audio().setLevel("opm", opmLevel);
