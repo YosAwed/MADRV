@@ -479,9 +479,6 @@
   grid-column: 1 / -1;
   justify-content: flex-end;
 }
-.program-output .program-diagnostics {
-  grid-template-columns: minmax(0, 1fr);
-}
 
 .program-source .compact-share-actions button:last-child {
   min-width: 0;
@@ -503,4 +500,19 @@
 }
 .program-source .compact-export > div {
   justify-content: flex-end;
+}
+
+/* Rarely used clock diagnostics sit below the main operating area. */
+.compact-debug {
+  max-width: 1800px;
+  margin: auto;
+  padding: 0 14px 14px;
+}
+.compact-debug .program-diagnostics {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+@media (max-width: 640px) {
+  .compact-debug {
+    padding: 0 6px 6px;
+  }
 }

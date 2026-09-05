@@ -244,12 +244,17 @@ try {
       mainBottom: document
         .querySelector(".compact-main")
         .getBoundingClientRect().bottom,
+      diagnosticsTop: document
+        .querySelector('[data-panel="diagnostics"]')
+        .getBoundingClientRect().top,
     }));
+    if (measured.diagnosticsTop < measured.mainBottom - 1)
+      throw new Error("Debug diagnostics are not below the main operating area.");
     if (measured.scrollWidth > width + 1)
       throw new Error(`Horizontal overflow at ${width}`);
-    if (width >= 1366 && measured.scrollHeight > height + 1)
+    if (width >= 1366 && measured.mainBottom > height + 1)
       throw new Error(
-        `Default desktop requires scrolling: ${JSON.stringify(measured)}`
+        `Main controls require desktop scrolling: ${JSON.stringify(measured)}`
       );
     if (width >= 1366) {
       await assertCommonControls();
