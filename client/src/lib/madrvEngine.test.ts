@@ -24,6 +24,33 @@ function makeDiagnosticMdr(midiTrackIndex = -1, legacyMidiTrackIndex = -1): Arra
   return bytes.buffer;
 }
 
+function makeLegacySlotRoutedMdr(): ArrayBuffer {
+  const title = new TextEncoder().encode("Legacy slot routing\r\n\x1aNONE\0");
+  const table = new Uint8Array(66);
+  const tracks: number[] = [];
+  let offset = 66;
+  for (let index = 0; index < 32; index += 1) {
+    table[2 + index * 2] = offset >> 8;
+    table[3 + index * 2] = offset & 0xff;
+    const track = index === 0
+      ? [0xe0, 0xff, 0x80, 0x03, 0xf1, 0x00]
+      : index === 8
+        ? [0x88, 0x03, 0xf1, 0x00]
+        : index === 16
+          ? [0x60, 0x03, 0xf1, 0x00]
+          : [0xf1, 0x00];
+    tracks.push(...track);
+    offset += track.length;
+  }
+  table[0] = offset >> 8;
+  table[1] = offset & 0xff;
+  const bytes = new Uint8Array(title.length + table.length + tracks.length);
+  bytes.set(title, 0);
+  bytes.set(table, title.length);
+  bytes.set(tracks, title.length + table.length);
+  return bytes.buffer;
+}
+
 describe("Signal Deck diagnostic catalog", () => {
   it("normalizes the built-in diagnostic catalog entry", () => {
     const entries = parseRemoteCatalogPayload({ entries: [{ id: "signal-deck-diagnostic", title: "Signal Deck — Diagnostic MDR", mdrUrl: "/manus-storage/signal-deck-diagnostic_d91a1673.mdr", tags: ["diagnostic", "opm"] }] });
@@ -49,6 +76,16 @@ describe("Signal Deck diagnostic catalog", () => {
     const info = inspectMdr(makeDiagnosticMdr(-1, 16));
     expect(info.hardwareTracks).toBe(1);
     expect(info.midiTracks).toBe(1);
+  });
+
+  it("uses legacy MDR slot defaults when native tracks omit E0 08 routing", () => {
+    const buffer = makeLegacySlotRoutedMdr();
+    const info = inspectMdr(buffer);
+    expect(info).toMatchObject({ activeTracks: 3, hardwareTracks: 2, midiTracks: 1 });
+    expect(listMdrMixerTracks(buffer).filter((track) => track.active).map((track) => track.engine)).toEqual(["opm", "pcm", "midi"]);
+    expect(resolveMdrTrackEngine(new Uint8Array([0xe0, 0xff, 0x80, 0x03, 0xf1, 0x00]), 0, 6, 0)).toBe("opm");
+    expect(resolveMdrTrackEngine(new Uint8Array([0x88, 0x03, 0xf1, 0x00]), 0, 4, 8)).toBe("pcm");
+    expect(resolveMdrTrackEngine(new Uint8Array([0x60, 0x03, 0xf1, 0x00]), 0, 4, 16)).toBe("midi");
   });
 
   it("classifies PCM voices parked past track 16 by $E0 $08 channel, not slot index", () => {

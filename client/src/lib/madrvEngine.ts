@@ -1210,7 +1210,13 @@ export function resolveMdrTrackEngine(bytes: Uint8Array, start: number, end: num
   let sawMidi = false;
   let sawOpmChannel = false;
   let sawPcmChannel = false;
+  let sawHardwareNote = false;
   for (let offset = start; offset + 2 < end; offset += 1) {
+    // Legacy EX-MDR files often omit E0 08 for the native tracks. In that
+    // form MADRV uses the track slot as the default device: A-H are OPM,
+    // P-W are PCM, and the upper half is GS MIDI. Keep a note check so short
+    // F1/end stubs in MIDI-only songs do not turn into phantom hardware tracks.
+    if (bytes[offset]! >= 0x80 && bytes[offset]! <= 0xdf) sawHardwareNote = true;
     if (bytes[offset] !== 0xe0) continue;
     const subcommand = bytes[offset + 1]!;
     if (subcommand === 0x0e) {
@@ -1232,8 +1238,13 @@ export function resolveMdrTrackEngine(bytes: Uint8Array, start: number, end: num
   if (sawPcmChannel) return "pcm";
   if (sawMidi) return "midi";
   if (sawOpmChannel) return "opm";
-  // No $E0 voice routing: do not infer OPM/PCM from slot index (GS scores may leave tempo/end stubs in low slots).
-  return "midi";
+  if (!sawHardwareNote) return "midi";
+  if (index >= 16) return "midi";
+  if (index >= 8) return "pcm";
+  // No $E0 voice routing: use MADRV's legacy slot defaults for native tracks.
+  // This is required for older OPM+GS files such as NAMA47GS.MDR, which have
+  // full A-H note streams but no explicit E0 08 channel assignment.
+  return "opm";
 }
 
 function isMdrMidiTrack(bytes: Uint8Array, start: number, end: number): boolean {
