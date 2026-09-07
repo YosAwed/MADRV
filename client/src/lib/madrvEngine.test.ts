@@ -335,12 +335,13 @@ describe("SoundFont MDR timing correction", () => {
 
   it("smooths live MXDRV sync residuals into a suggested total correction", () => {
     const snapshot = { scheduledSeconds: 12.4, dispatchedSeconds: 12.55, hardwareMilliseconds: 12_620 };
-    expect(resolveSoundFontMdrSyncResidualMs(snapshot)).toBeCloseTo(220, 5);
+    expect(resolveSoundFontMdrSyncResidualMs(snapshot)).toBeCloseTo(150, 5);
     const first = updateSoundFontMdrDelayMeasurement(null, snapshot, 30);
-    expect(first?.suggestedTotalMs).toBe(250);
+    expect(first?.suggestedTotalMs).toBe(180);
     const second = updateSoundFontMdrDelayMeasurement(first, { ...snapshot, hardwareMilliseconds: 12_500 }, 30);
     expect(second?.sampleCount).toBe(2);
-    expect(second?.suggestedTotalMs).toBeLessThan(250);
+    expect(second?.suggestedTotalMs).toBe(180);
+    expect(resolveSoundFontMdrSyncResidualMs({ ...snapshot, hardwareMilliseconds: null })).toBeNull();
   });
 
   it("keeps separate persisted corrections for each SoundFont and falls back to the historic common correction", () => {

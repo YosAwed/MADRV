@@ -279,10 +279,16 @@ export function recommendSoundFontMdrDelayMs(input: {
   };
 }
 
-/** Residual OPM-vs-GS skew on the MXDRV song clock; positive means GS MIDI is audibly early. */
+/** Residual OPM-vs-GS skew on the offset-corrected MXDRV song clock; positive means GS MIDI is audibly early. */
 export function resolveSoundFontMdrSyncResidualMs(snapshot: MdrMidiSyncSnapshot | null | undefined): number | null {
-  if (!snapshot || snapshot.hardwareMilliseconds === null) return null;
-  return snapshot.hardwareMilliseconds - snapshot.scheduledSeconds * 1000;
+  if (!snapshot || snapshot.hardwareMilliseconds === null || !Number.isFinite(snapshot.dispatchedSeconds) || !Number.isFinite(snapshot.scheduledSeconds)) return null;
+  // `hardwareMilliseconds` is the raw core playhead and includes the initial
+  // ScriptProcessor/output-buffer offset. `dispatchedSeconds` is the same
+  // playhead after that offset has been removed in startMdrMidiTimeline().
+  // Comparing the raw value to the corrected MIDI timeline reports a fixed
+  // ~300 ms "drift" on dense songs such as MEGALITH and leads users to apply
+  // an incorrect SoundFont delay.
+  return (snapshot.dispatchedSeconds - snapshot.scheduledSeconds) * 1000;
 }
 
 export type SoundFontMdrDelayMeasurement = {
