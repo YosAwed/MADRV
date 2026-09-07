@@ -310,9 +310,10 @@ describe("SoundFont MDR timing correction", () => {
     expect(resolveSoundFontMdrDispatchAtSeconds(0.01, -18)).toBe(0);
   });
 
-  it("ends hybrid MDR on MXDRV termination and GS-only MDR on MIDI timeline completion", () => {
+  it("ends hybrid MDR after MXDRV termination and trailing GS MIDI completion", () => {
     expect(shouldEndFiniteMdrPlayback(true, false, true)).toBe(false);
-    expect(shouldEndFiniteMdrPlayback(true, true, false)).toBe(true);
+    expect(shouldEndFiniteMdrPlayback(true, true, false)).toBe(false);
+    expect(shouldEndFiniteMdrPlayback(true, true, true)).toBe(true);
     expect(shouldEndFiniteMdrPlayback(false, false, false)).toBe(false);
     expect(shouldEndFiniteMdrPlayback(false, true, true)).toBe(true);
   });
@@ -515,6 +516,13 @@ describe("MDR playback duration", () => {
   it("retains scheduled GS MIDI events after a shorter OPM measurement", () => {
     expect(resolveMdrPlaybackDuration(1.8, [{ at: 311.23875, sourceTrack: 16, bytes: [0x80, 60, 0] }])).toBeCloseTo(312.73875, 5);
     expect(resolveMdrPlaybackDuration(12, [])).toBe(12);
+  });
+
+  it("uses a converted MIDI loop as the finite boundary when MXDRV duration saturates", () => {
+    const loopWindow = { startSeconds: 41.118, endSeconds: 80.418 };
+    const midiEvents = [{ at: 80.418, sourceTrack: 1, bytes: [0x80, 60, 0] }];
+    expect(resolveMdrPlaybackDuration(1200, midiEvents, loopWindow)).toBeCloseTo(81.918, 5);
+    expect(resolveMdrPlaybackDuration(1200, midiEvents)).toBe(1200);
   });
 
 });

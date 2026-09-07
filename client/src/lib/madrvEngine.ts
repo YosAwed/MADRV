@@ -310,9 +310,9 @@ export function updateSoundFontMdrDelayMeasurement(
   };
 }
 
-/** Hybrid OPM/PCM playback ends on MXDRV termination; GS-only MDR ends when its MIDI timeline is exhausted. */
+/** Hybrid OPM/PCM playback ends after MXDRV termination and any trailing GS MIDI events. */
 export function shouldEndFiniteMdrPlayback(needsHardwareRenderer: boolean, hardwareTerminated: boolean, midiTimelineComplete: boolean): boolean {
-  if (needsHardwareRenderer) return hardwareTerminated;
+  if (needsHardwareRenderer) return hardwareTerminated && midiTimelineComplete;
   return midiTimelineComplete;
 }
 
@@ -868,10 +868,27 @@ export type MdrMidiSyncSnapshot = {
  * hybrid OPM/PCM and GS MIDI retain their shared song position over long songs.
  */
 /** Extends a hardware-measured MDR duration through its final scheduled GS MIDI event plus a short release tail. */
-export function resolveMdrPlaybackDuration(hardwareDuration: number, midiEvents: readonly ScheduledMdrMidiEvent[]): number {
+export function resolveMdrPlaybackDuration(
+  hardwareDuration: number,
+  midiEvents: readonly ScheduledMdrMidiEvent[],
+  midiLoopWindow?: MdrMidiLoopWindow,
+): number {
   const safeHardwareDuration = Number.isFinite(hardwareDuration) && hardwareDuration > 0 ? hardwareDuration : 0;
   const finalMidiEvent = midiEvents.reduce((latest, event) => Number.isFinite(event.at) ? Math.max(latest, event.at) : latest, 0);
-  return Math.max(safeHardwareDuration, finalMidiEvent > 0 ? finalMidiEvent + 1.5 : 0);
+  const midiDuration = finalMidiEvent > 0 ? finalMidiEvent + 1.5 : 0;
+  // The MXDRV duration probe has a finite ceiling. When it reaches that
+  // ceiling, an MDR L loop with a converted MIDI loop window supplies the
+  // actual finite browser boundary; retaining 1200 seconds would make the
+  // transport appear to never finish.
+  const hasValidMidiLoop = Boolean(
+    midiLoopWindow
+    && Number.isFinite(midiLoopWindow.startSeconds)
+    && Number.isFinite(midiLoopWindow.endSeconds)
+    && midiLoopWindow.startSeconds >= 0
+    && midiLoopWindow.endSeconds > midiLoopWindow.startSeconds,
+  );
+  if (safeHardwareDuration >= 1200 && hasValidMidiLoop && midiDuration > 0) return midiDuration;
+  return Math.max(safeHardwareDuration, midiDuration);
 }
 
 /** Infinite hybrid playback wraps on MXDRV's measured loop boundary, never on a trailing GS MIDI release event. */
@@ -1697,7 +1714,7 @@ export async function estimateMdrPlaybackDuration(mdr: ArrayBuffer, pdx: ArrayBu
   const player = new MadrvWasmPlayer();
   const hardware = await player.load(mdr, pdx, 1, 48_000);
   const midiTimeline = await extractMdrMidiEvents(mdr, 1, 48_000);
-  return resolveMdrPlaybackDuration(hardware.duration, midiTimeline.events);
+  return resolveMdrPlaybackDuration(hardware.duration, midiTimeline.events, midiTimeline.loopWindow);
 }
 
 export class SignalDeckAudio {
@@ -2473,14 +2490,27 @@ export class SignalDeckAudio {
     const songMidiTimeline = measuredLoops === 1 ? midiTimeline : await extractMdrMidiEvents(mdr, 1, resolveMdrMidiTimingSampleRate());
     const midiEvents = midiTimeline.events;
     throwIfPlaybackSuperseded(playbackGeneration, this.playbackGeneration);
-    const songInfo: MdrPlaybackInfo = { ...info, duration: resolveMdrPlaybackDuration(info.duration, songMidiTimeline.events) };
     const totalHardwareDuration = needsHardwareRenderer && measuredLoops > 1 ? this.mdrPlayer!.measureDuration(measuredLoops) : info.duration;
-    const totalPlaybackDuration = resolveMdrPlaybackDuration(totalHardwareDuration, midiEvents);
     // Duration probing mutates the renderer: finish every measurement before
     // start(), otherwise infinite playback can leave OPM/PCM silent.
-    const hardwareCycleSeconds = needsHardwareRenderer && loops <= 0
+    const hardwareCycleSeconds = needsHardwareRenderer && (loops <= 0 || Boolean(midiTimeline.loopWindow))
       ? resolveMdrHardwareLoopCycleSeconds(info.duration, this.mdrPlayer!.measureDuration(2))
       : undefined;
+    const trustedSongMidiLoopWindow = resolveTrustedMdrMidiLoopWindow(
+      songMidiTimeline.loopWindow,
+      needsHardwareRenderer ? info.duration : undefined,
+      hardwareCycleSeconds,
+    );
+    const trustedFiniteMidiLoopWindow = resolveTrustedMdrMidiLoopWindow(
+      midiTimeline.loopWindow,
+      needsHardwareRenderer ? info.duration : undefined,
+      hardwareCycleSeconds,
+    );
+    const songInfo: MdrPlaybackInfo = {
+      ...info,
+      duration: resolveMdrPlaybackDuration(info.duration, songMidiTimeline.events, trustedSongMidiLoopWindow),
+    };
+    const totalPlaybackDuration = resolveMdrPlaybackDuration(totalHardwareDuration, midiEvents, trustedFiniteMidiLoopWindow);
     // The MDR path keeps rendering in the stateful v11 core so actual MXDRV termination
     // and the browser's finite-loop setting cannot diverge from the displayed transport.
     if (needsHardwareRenderer) {
@@ -2515,9 +2545,7 @@ export class SignalDeckAudio {
     const startsAt = context.currentTime + (needsHardwareRenderer
       ? resolveMdrPlaybackStartLatencySeconds(this.performanceProfile, context.sampleRate, context.outputLatency, context.baseLatency)
       : 0.025);
-    const trustedMidiLoopWindow = loops <= 0
-      ? resolveTrustedMdrMidiLoopWindow(midiTimeline.loopWindow, needsHardwareRenderer ? info.duration : undefined, hardwareCycleSeconds)
-      : undefined;
+    const trustedMidiLoopWindow = loops <= 0 ? trustedFiniteMidiLoopWindow : undefined;
     const infiniteMidiLoopWindow = loops <= 0
       ? trustedMidiLoopWindow ?? (() => {
           const period = resolveMdrInfiniteMidiLoopPeriodSeconds(info.duration, songInfo.duration, needsHardwareRenderer);
@@ -2545,16 +2573,17 @@ export class SignalDeckAudio {
     };
     frame = requestAnimationFrame(animate);
     // MXDRV may retain an intentional song loop after its runtime state is no
-    // longer useful for a browser transport. The duration has already been
-    // extended through the final GS MIDI event, so it is a finite, user-visible
-    // loop bound rather than the old hardware-only early-stop estimate.
+    // longer useful for a browser transport. A saturated hardware measurement
+    // is bounded by the converted MIDI loop window; other songs retain a longer
+    // wall-clock failsafe in case the termination export stalls.
     if (loops > 0) {
-      const endDelaySeconds = needsHardwareRenderer
+      const midiBoundaryIsReliable = needsHardwareRenderer
+        && Boolean(trustedFiniteMidiLoopWindow);
+      const endDelaySeconds = needsHardwareRenderer && !midiBoundaryIsReliable
         ? resolveMdrPlaybackFailsafeSeconds(totalPlaybackDuration)
         : totalPlaybackDuration + 0.12;
       this.endTimer = window.setTimeout(() => {
         if (!isCurrentPlaybackGeneration(playbackGeneration, this.playbackGeneration)) return;
-        if (needsHardwareRenderer && !this.mdrPlayer?.isTerminated()) return;
         cancelAnimationFrame(frame);
         this.stop();
         this.publishProgress(onProgress, songInfo.duration, true);
