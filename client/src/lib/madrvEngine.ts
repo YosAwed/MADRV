@@ -181,7 +181,7 @@ export function normalizeExternalMidiAdvanceMs(value: number): number {
 }
 
 /** Maximum user-facing SoundFont delay when OPM/PCM audibly leads GS MIDI on a device. */
-export const MADRV_SOUND_FONT_MDR_DELAY_MS_LIMIT = 350;
+export const MADRV_SOUND_FONT_MDR_DELAY_MS_LIMIT = 500;
 
 /** Positive values postpone the browser SoundFont without affecting OPM, PCM, or external MIDI. */
 export function normalizeSoundFontMdrDelayMs(value: number): number {
@@ -2519,6 +2519,28 @@ export class SignalDeckAudio {
     const totalPlaybackDuration = resolveMdrPlaybackDuration(totalHardwareDuration, midiEvents, trustedFiniteMidiLoopWindow);
     // The MDR path keeps rendering in the stateful v11 core so actual MXDRV termination
     // and the browser's finite-loop setting cannot diverge from the displayed transport.
+    // `AudioProcessingEvent.playbackTime` is the AudioContext timestamp at which
+    // the block being rendered reaches the graph output. The callback itself
+    // runs one ScriptProcessor block earlier, so using `currentTime` here makes
+    // SoundFont MIDI start roughly one large buffer ahead on stable profiles.
+    const fallbackStartsAt = context.currentTime + (needsHardwareRenderer
+      ? resolveMdrPlaybackStartLatencySeconds(this.performanceProfile, context.sampleRate, context.outputLatency, context.baseLatency)
+      : 0.025);
+    const trustedMidiLoopWindow = loops <= 0 ? trustedFiniteMidiLoopWindow : undefined;
+    const infiniteMidiLoopWindow = loops <= 0
+      ? trustedMidiLoopWindow ?? (() => {
+          const period = resolveMdrInfiniteMidiLoopPeriodSeconds(info.duration, songInfo.duration, needsHardwareRenderer);
+          return period ? { startSeconds: 0, endSeconds: period } : undefined;
+        })()
+      : undefined;
+    let startsAt = fallbackStartsAt;
+    let midiTimelineStarted = false;
+    const startMidiTimeline = (audibleStartAt?: number) => {
+      if (midiTimelineStarted) return;
+      midiTimelineStarted = true;
+      startsAt = Number.isFinite(audibleStartAt) ? Math.max(context.currentTime, audibleStartAt as number) : fallbackStartsAt;
+      this.startMdrMidiTimeline(midiEvents, startsAt, infiniteMidiLoopWindow);
+    };
     if (needsHardwareRenderer) {
       const node = context.createScriptProcessor(resolveScriptProcessorBufferSize(this.performanceProfile), 0, 2);
       node.onaudioprocess = (event) => {
@@ -2533,6 +2555,10 @@ export class SignalDeckAudio {
           this.reportTimerB(this.mdrPlayer?.getTimerB() ?? null);
           this.reportHardwarePlaybackPosition(this.mdrPlayer?.getPlayAtMilliseconds() ?? null);
         }
+        if (!midiTimelineStarted) {
+          const playbackTime = Number((event as AudioProcessingEvent).playbackTime);
+          startMidiTimeline(Number.isFinite(playbackTime) ? playbackTime : undefined);
+        }
       };
       node.connect(gains.opm);
       this.mdrNode = node;
@@ -2544,21 +2570,8 @@ export class SignalDeckAudio {
       // GS MIDI-only MDR has no live OPM Timer-B; surface the score's $FF/$FE $12 tempo instead.
       this.reportTimerB(resolveMdrDisplayTempoTimerB(mdr));
       this.reportHardwarePlaybackPosition(null);
+      startMidiTimeline(fallbackStartsAt);
     }
-    // ScriptProcessor output is audible after its buffer latency and the device
-    // output path. Dispatch t=0 GS MIDI on that same audible edge so key-on is
-    // not immediately hidden by a matching note-off.
-    const startsAt = context.currentTime + (needsHardwareRenderer
-      ? resolveMdrPlaybackStartLatencySeconds(this.performanceProfile, context.sampleRate, context.outputLatency, context.baseLatency)
-      : 0.025);
-    const trustedMidiLoopWindow = loops <= 0 ? trustedFiniteMidiLoopWindow : undefined;
-    const infiniteMidiLoopWindow = loops <= 0
-      ? trustedMidiLoopWindow ?? (() => {
-          const period = resolveMdrInfiniteMidiLoopPeriodSeconds(info.duration, songInfo.duration, needsHardwareRenderer);
-          return period ? { startSeconds: 0, endSeconds: period } : undefined;
-        })()
-      : undefined;
-    this.startMdrMidiTimeline(midiEvents, startsAt, infiniteMidiLoopWindow);
     this.lastProgressUpdateAt = Number.NEGATIVE_INFINITY;
     let frame = 0;
     const animate = () => {

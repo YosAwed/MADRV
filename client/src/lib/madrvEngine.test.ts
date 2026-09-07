@@ -299,11 +299,11 @@ describe("SoundFont MDR timing correction", () => {
 
   it("bounds a local SoundFont delay and postpones only the scheduled internal MIDI edge", () => {
     expect(normalizeSoundFontMdrDelayMs(12.6)).toBe(13);
-    expect(normalizeSoundFontMdrDelayMs(999)).toBe(350);
-    expect(normalizeSoundFontMdrDelayMs(-999)).toBe(-350);
+    expect(normalizeSoundFontMdrDelayMs(999)).toBe(500);
+    expect(normalizeSoundFontMdrDelayMs(-999)).toBe(-500);
     expect(stepSoundFontMdrDelayMs(-2, 1)).toBe(-1);
-    expect(stepSoundFontMdrDelayMs(350, 1)).toBe(350);
-    expect(stepSoundFontMdrDelayMs(-350, -1)).toBe(-350);
+    expect(stepSoundFontMdrDelayMs(500, 1)).toBe(500);
+    expect(stepSoundFontMdrDelayMs(-500, -1)).toBe(-500);
     expect(resolveSoundFontMdrScheduleAtSeconds(4, 18)).toBeCloseTo(4.018, 6);
     expect(resolveSoundFontMdrScheduleAtSeconds(4, -18)).toBeCloseTo(3.982, 6);
     expect(resolveSoundFontMdrDispatchAtSeconds(4, 18)).toBeCloseTo(4.018, 6);
