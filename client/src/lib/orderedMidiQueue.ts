@@ -6,6 +6,12 @@ type QueueEntry<Event> = {
 
 export type OrderedMidiQueueOptions<Event, TimerHandle> = {
   now(): number;
+  /**
+   * Optional amount of time by which an event may be handed to the audio
+   * scheduler before its deadline. The event keeps its original targetAt;
+   * only the main-thread dispatch is moved earlier.
+   */
+  dispatchLeadSeconds?(): number;
   schedule(callback: () => void, delayMs: number): TimerHandle;
   cancel(handle: TimerHandle): void;
   dispatch(event: Event, targetAt: number): void;
@@ -50,8 +56,13 @@ export class OrderedMidiQueue<Event, TimerHandle = number> {
     try {
       while (this.head < this.entries.length) {
         const entry = this.entries[this.head]!;
-        const delayMs = (entry.targetAt - this.options.now()) * 1000;
-        if (!entry.early && delayMs > 0) {
+        const leadSeconds = this.options.dispatchLeadSeconds?.() ?? 0;
+        const safeLeadSeconds = Number.isFinite(leadSeconds) ? Math.max(0, leadSeconds) : 0;
+        const delayMs = (entry.targetAt - this.options.now() - safeLeadSeconds) * 1000;
+        // Treat sub-millisecond rounding noise as due. Without this guard a
+        // timer scheduled for `targetAt - lead` can wake a few floating-point
+        // ulps early and immediately schedule another 1 ms timer.
+        if (!entry.early && delayMs > 0.5) {
           const generation = ++this.timerGeneration;
           const handle = this.options.schedule(
             () => {

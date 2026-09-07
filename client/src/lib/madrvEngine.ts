@@ -424,6 +424,16 @@ export function resolveMdrMidiPumpIntervalMs(profile: PlaybackPerformanceProfile
   return profile === "mobile" ? 50 : 20;
 }
 
+/**
+ * Hands SoundFont MIDI to the AudioWorklet slightly before its deadline so a
+ * busy browser main thread cannot turn a timer callback into audible lateness.
+ * Keep this below one desktop ScriptProcessor block: stopping playback then
+ * leaves at most this short, already-scheduled tail in the worklet.
+ */
+export function resolveMdrMidiDispatchLeadSeconds(profile: PlaybackPerformanceProfile): number {
+  return profile === "mobile" ? 0.05 : 0.04;
+}
+
 /** Converts the OPM Timer-B register into a quarter-note BPM equivalent at MADRV's 48 PPQN timing. */
 export function timerBToEstimatedBpm(timerB: number, ppqn = 48): number | null {
   if (!Number.isInteger(timerB) || timerB < 0 || timerB > 255 || !Number.isInteger(ppqn) || ppqn <= 0) return null;
@@ -1743,6 +1753,7 @@ export class SignalDeckAudio {
   /** Preserve score order across live-clock corrections; STOP cancels unsent events. */
   private mdrSoundFontQueue = new OrderedMidiQueue<{ bytes: number[]; sourceTrack: number; playbackGeneration: number }>({
     now: () => this.graph.context.currentTime,
+    dispatchLeadSeconds: () => resolveMdrMidiDispatchLeadSeconds(this.performanceProfile),
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: (timer) => window.clearTimeout(timer),
     dispatch: ({ bytes, sourceTrack, playbackGeneration }, targetAt) => {

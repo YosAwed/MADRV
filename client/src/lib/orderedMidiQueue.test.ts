@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { OrderedMidiQueue } from "./orderedMidiQueue";
 
-function makeQueue(initialTime = 10) {
+function makeQueue(initialTime = 10, dispatchLeadSeconds = 0) {
   let now = initialTime;
   let nextTimer = 1;
   let timersCreated = 0;
@@ -13,6 +13,7 @@ function makeQueue(initialTime = 10) {
   }[] = [];
   const queue = new OrderedMidiQueue<string>({
     now: () => now,
+    dispatchLeadSeconds: () => dispatchLeadSeconds,
     schedule: (callback, delayMs) => {
       const id = nextTimer++;
       timersCreated += 1;
@@ -152,5 +153,17 @@ describe("OrderedMidiQueue", () => {
     });
     queue.enqueue("first", 10.5, true);
     expect(events).toEqual(["first", "second"]);
+  });
+
+  it("dispatches scheduled worklet events before their deadline while retaining the target timestamp", () => {
+    const test = makeQueue(10, 0.05);
+    test.queue.enqueue("future", 10.1);
+    expect(test.dispatched).toEqual([]);
+    test.advanceTo(10.049);
+    expect(test.dispatched).toEqual([]);
+    test.advanceTo(10.05);
+    expect(test.dispatched).toHaveLength(1);
+    expect(test.dispatched[0]).toMatchObject({ event: "future", targetAt: 10.1 });
+    expect(test.dispatched[0]?.dispatchedAt).toBeCloseTo(10.05, 8);
   });
 });
