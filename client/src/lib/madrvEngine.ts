@@ -1825,6 +1825,19 @@ export class SignalDeckAudio {
         && !this.mutedMdrTracks.has(sourceTrack)) this.updateMdrMidiTrackKeys(bytes, sourceTrack);
     },
   });
+  /**
+   * Large stable-profile audio blocks can contain several short OPM notes. Keep
+   * their key states on the rendered audio timeline instead of sampling only
+   * the final state at the end of the block.
+   */
+  private mdrHardwareVisualQueue = new OrderedMidiQueue<{ snapshot: MdrTrackKeyState; generation: number }>({
+    now: () => this.graph.context.currentTime,
+    schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+    cancel: timer => window.clearTimeout(timer),
+    dispatch: ({ snapshot, generation }) => {
+      if (generation === this.playbackGeneration) this.applyHardwareTrackKeys(snapshot);
+    },
+  });
   /** Latest planned or actually submitted MIDI timestamp, including late dispatch. */
   private mdrMidiLastEventAt: number | null = null;
   private gsSynth?: GsSynth;
@@ -2186,25 +2199,62 @@ export class SignalDeckAudio {
     this.publishMdrTrackKeys(true);
   }
 
-  private reportHardwareTrackKeys() {
-    if (!this.mdrPlayer) return;
-    let next: MdrTrackKeyState | undefined;
+  private readHardwareTrackKeys(): MdrTrackKeyState {
+    const snapshot: MdrTrackKeyState = {};
+    if (!this.mdrPlayer) return snapshot;
     for (const track of this.mdrHardwareTrackIndexes) {
       const midiNote = this.mdrPlayer.getHardwareTrackMidiNote(track);
+      if (midiNote !== null) snapshot[track] = [midiNote];
+    }
+    return snapshot;
+  }
+
+  private applyHardwareTrackKeys(snapshot: MdrTrackKeyState) {
+    let next: MdrTrackKeyState | undefined;
+    for (const track of this.mdrHardwareTrackIndexes) {
       const current = this.mdrTrackKeys[track];
-      if (midiNote === null) {
+      const notes = snapshot[track];
+      if (!notes) {
         if (!current) continue;
         next ??= { ...this.mdrTrackKeys };
         delete next[track];
         continue;
       }
-      if (current?.length === 1 && current[0] === midiNote) continue;
+      if (current?.length === notes.length && current.every((note, index) => note === notes[index])) continue;
       next ??= { ...this.mdrTrackKeys };
-      next[track] = [midiNote];
+      next[track] = notes;
     }
     if (!next) return;
     this.mdrTrackKeys = next;
     this.publishMdrTrackKeys();
+  }
+
+  private reportHardwareTrackKeys() {
+    this.applyHardwareTrackKeys(this.readHardwareTrackKeys());
+  }
+
+  private queueHardwareTrackKeys(targetAt: number) {
+    if (!this.mdrTrackKeyListener || !this.mdrPlayer || !this.mdrHardwareTrackIndexes.length) return;
+    this.mdrHardwareVisualQueue.enqueue({ snapshot: this.readHardwareTrackKeys(), generation: this.playbackGeneration }, targetAt);
+  }
+
+  /** Render in small internal slices so short OPM notes are visible to the UI
+   * while retaining the larger ScriptProcessor buffer used for audio stability. */
+  private renderMdrOutputBlock(left: Float32Array, right: Float32Array, blockPlaybackTime: number): number {
+    if (!this.mdrPlayer) {
+      left.fill(0);
+      right.fill(0);
+      return 0;
+    }
+    const sampleRate = resolvePlaybackSampleRate(this.graph.context.sampleRate);
+    const sliceFrames = this.mdrTrackKeyListener ? 2048 : left.length;
+    let peak = 0;
+    for (let offset = 0; offset < left.length; offset += sliceFrames) {
+      const end = Math.min(left.length, offset + sliceFrames);
+      peak = Math.max(peak, this.mdrPlayer.renderInto(left.subarray(offset, end), right.subarray(offset, end)));
+      if (this.mdrTrackKeyListener) this.queueHardwareTrackKeys(blockPlaybackTime + end / sampleRate);
+    }
+    return peak;
   }
 
   private updateMdrMidiTrackKeys(bytes: number[], sourceTrack: number) {
@@ -2562,6 +2612,7 @@ export class SignalDeckAudio {
     this.playbackGeneration += 1;
     this.resetMdrMidiScheduler();
     this.mdrMidiVisualQueue.clear();
+    this.mdrHardwareVisualQueue.clear();
     this.mdrMidiMuteVersions.clear();
     this.mdrAudioTimeline = undefined;
     this.mdrMidiPump = undefined;
@@ -2713,10 +2764,10 @@ export class SignalDeckAudio {
         const left = event.outputBuffer.getChannelData(0);
         const right = event.outputBuffer.getChannelData(1);
         if (!isCurrentPlaybackGeneration(playbackGeneration, this.playbackGeneration)) { left.fill(0); right.fill(0); return; }
-        const peak = this.mdrPlayer?.renderInto(left, right) ?? 0;
         const reportedPlaybackTime = Number((event as AudioProcessingEvent).playbackTime);
         const blockPlaybackTime = Number.isFinite(reportedPlaybackTime) && reportedPlaybackTime >= 0
           ? reportedPlaybackTime : context.currentTime + left.length / context.sampleRate;
+        const peak = this.renderMdrOutputBlock(left, right, blockPlaybackTime);
         this.mdrAudioTimeline?.recordBlock(blockPlaybackTime, left.length, this.mdrPlayer?.isTerminated() ?? false);
         if (hardwareEndAt === undefined && this.mdrPlayer?.isTerminated()) {
           const playbackTime = Number((event as AudioProcessingEvent).playbackTime);
@@ -2727,7 +2778,7 @@ export class SignalDeckAudio {
         if (this.shouldPublishRealtimeVisuals()) {
           this.outputPeakListener?.(peak);
           this.reportPcmActivity(this.mdrPlayer?.getPcmActiveMask() ?? 0);
-          this.reportHardwareTrackKeys();
+          if (!this.mdrTrackKeyListener) this.reportHardwareTrackKeys();
           this.reportTimerB(this.mdrPlayer?.getTimerB() ?? null);
           this.reportHardwarePlaybackPosition(this.mdrPlayer?.getPlayAtMilliseconds() ?? null);
         }
@@ -2828,12 +2879,15 @@ export class SignalDeckAudio {
       node.onaudioprocess = (event) => {
         const left = event.outputBuffer.getChannelData(0);
         const right = event.outputBuffer.getChannelData(1);
-        const peak = this.mdrPlayer?.renderInto(left, right) ?? 0;
+        const reportedPlaybackTime = Number((event as AudioProcessingEvent).playbackTime);
+        const blockPlaybackTime = Number.isFinite(reportedPlaybackTime) && reportedPlaybackTime >= 0
+          ? reportedPlaybackTime : context.currentTime + left.length / context.sampleRate;
+        const peak = this.renderMdrOutputBlock(left, right, blockPlaybackTime);
         this.noteAudioCallback("opm", left.length);
         if (this.shouldPublishRealtimeVisuals()) {
           this.outputPeakListener?.(peak);
           this.reportPcmActivity(this.mdrPlayer?.getPcmActiveMask() ?? 0);
-          this.reportHardwareTrackKeys();
+          if (!this.mdrTrackKeyListener) this.reportHardwareTrackKeys();
           this.reportTimerB(this.mdrPlayer?.getTimerB() ?? null);
           this.reportHardwarePlaybackPosition(this.mdrPlayer?.getPlayAtMilliseconds() ?? null);
         }

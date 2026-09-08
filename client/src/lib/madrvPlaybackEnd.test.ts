@@ -54,6 +54,9 @@ type EngineInternals = {
   mdrMidiTimelineComplete: boolean;
   mdrMidiLastEventAt: number | null;
   mdrSoundFontQueue: { pendingCount: number; latestTargetAt: number | null };
+  mdrHardwareTrackIndexes: number[];
+  mdrHardwareVisualQueue: { pendingCount: number; latestTargetAt: number | null };
+  renderMdrOutputBlock(left: Float32Array, right: Float32Array, blockPlaybackTime: number): number;
   startMdrMidiTimeline(events: readonly ScheduledMdrMidiEvent[], startsAt: number, loopWindow?: { startSeconds: number; endSeconds: number }): void;
   hasMdrMidiTailElapsed(): boolean;
   isMdrMidiPlaybackDrained(): boolean;
@@ -269,6 +272,36 @@ describe("hybrid MIDI draining", () => {
 });
 
 describe("finite MDR transport completion", () => {
+  it("publishes OPM key transitions inside a large output block", () => {
+    const h = createHarness();
+    h.internal.mdrHardwareTrackIndexes = [0];
+    let renderCalls = 0;
+    let note: number | null = 60;
+    h.player.getHardwareTrackMidiNote = vi.fn(() => note);
+    h.player.renderInto = vi.fn((left: Float32Array, right: Float32Array) => {
+      renderCalls += 1;
+      left.fill(0);
+      right.fill(0);
+      note = renderCalls === 1 ? 60 : null;
+      return 0;
+    });
+    const keys = vi.fn();
+    h.engine.setMdrTrackKeyListener(keys);
+    keys.mockClear();
+    h.forceAudioTime(0);
+
+    h.internal.renderMdrOutputBlock(new Float32Array(4096), new Float32Array(4096), 0);
+
+    expect(renderCalls).toBe(2);
+    expect(h.internal.mdrHardwareVisualQueue.pendingCount).toBe(2);
+    h.forceAudioTime(0.05);
+    h.advance(43);
+    expect(keys).toHaveBeenLastCalledWith({ 0: [60] });
+    h.forceAudioTime(0.1);
+    h.advance(43);
+    expect(keys).toHaveBeenLastCalledWith({});
+  });
+
   it("keeps the loaded SoundFont and pending notes intact when replacement is requested during playback", async () => {
     const h = createHarness();
     h.internal.gsMidiPort = { postMessage: vi.fn() };
