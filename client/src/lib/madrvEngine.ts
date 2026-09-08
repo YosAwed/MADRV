@@ -59,6 +59,7 @@ export function recommendPlaybackTuning(probe: PlaybackLoadProbe): PlaybackTunin
 
 /** MXDRV/X68Sound's browser core is calibrated at 48 kHz; the browser resamples this context to device output when needed. */
 const MADRV_NATIVE_SAMPLE_RATE = 48_000;
+const MDR_MIDI_RELEASE_SECONDS = 1.5;
 
 export type MmlEvent = {
   engine: EngineKind;
@@ -314,6 +315,26 @@ export function updateSoundFontMdrDelayMeasurement(
     suggestedTotalMs: normalizeSoundFontMdrDelayMs(Math.round(smoothedResidualMs + currentCorrectionMs)),
     sampleCount: previous.sampleCount + 1,
   };
+}
+
+/** Keeps the MIDI tail moving from the final MXDRV position, without jumping to wall-clock time. */
+export class MdrPlaybackClock {
+  private hardwareOffsetSeconds?: number;
+  private tailAnchor?: { contextSeconds: number; songSeconds: number };
+
+  constructor(private readonly alignHardwareStart = true) {}
+
+  read(contextElapsedSeconds: number, hardwareMilliseconds: number | null, hardwareTerminated: boolean): number {
+    const elapsed = Number.isFinite(contextElapsedSeconds) ? Math.max(0, contextElapsedSeconds) : 0;
+    if (this.tailAnchor) return this.tailAnchor.songSeconds + Math.max(0, elapsed - this.tailAnchor.contextSeconds);
+    const rawHardwareSeconds = hardwareMilliseconds !== null && Number.isFinite(hardwareMilliseconds)
+      ? Math.max(0, hardwareMilliseconds / 1000)
+      : null;
+    if (rawHardwareSeconds !== null) this.hardwareOffsetSeconds ??= this.alignHardwareStart ? rawHardwareSeconds - elapsed : 0;
+    const songSeconds = rawHardwareSeconds === null ? elapsed : Math.max(0, rawHardwareSeconds - this.hardwareOffsetSeconds!);
+    if (hardwareTerminated) this.tailAnchor = { contextSeconds: elapsed, songSeconds };
+    return songSeconds;
+  }
 }
 
 /** Hybrid OPM/PCM playback ends after MXDRV termination and any trailing GS MIDI events. */
@@ -891,7 +912,7 @@ export function resolveMdrPlaybackDuration(
 ): number {
   const safeHardwareDuration = Number.isFinite(hardwareDuration) && hardwareDuration > 0 ? hardwareDuration : 0;
   const finalMidiEvent = midiEvents.reduce((latest, event) => Number.isFinite(event.at) ? Math.max(latest, event.at) : latest, 0);
-  const midiDuration = finalMidiEvent > 0 ? finalMidiEvent + 1.5 : 0;
+  const midiDuration = finalMidiEvent > 0 ? finalMidiEvent + MDR_MIDI_RELEASE_SECONDS : 0;
   // The MXDRV duration probe has a finite ceiling. When it reaches that
   // ceiling, an MDR L loop with a converted MIDI loop window supplies the
   // actual finite browser boundary; retaining 1200 seconds would make the
@@ -1765,6 +1786,8 @@ export class SignalDeckAudio {
   private mdrMidiAnimationFrame?: number;
   private mdrMidiTimer?: number;
   private mdrMidiTimelineComplete = true;
+  /** Latest planned or actually submitted MIDI timestamp, including late dispatch. */
+  private mdrMidiLastEventAt: number | null = null;
   private gsSynth?: GsSynth;
   private gsLoaded = false;
   private workletReady?: Promise<void>;
@@ -2295,6 +2318,7 @@ export class SignalDeckAudio {
 
   private sendMdrMidi(bytes: number[], sourceTrack: number, advanceMs = 0, scheduleAt?: number) {
     if (bytes.length === 0) return;
+    this.mdrMidiLastEventAt = Math.max(this.mdrMidiLastEventAt ?? 0, this.graph.context.currentTime, scheduleAt ?? 0);
     this.updateMdrMidiTrackKeys(bytes, sourceTrack);
     if (this.midiOutput) {
       const correction = normalizeExternalMidiAdvanceMs(advanceMs);
@@ -2325,6 +2349,16 @@ export class SignalDeckAudio {
     this.mdrSoundFontQueue.enqueue({ bytes, sourceTrack, playbackGeneration }, targetAt, scheduleInWorklet);
   }
 
+  private hasMdrMidiTailElapsed(): boolean {
+    const lastEventAt = Math.max(this.mdrMidiLastEventAt ?? Number.NEGATIVE_INFINITY, this.mdrSoundFontQueue.latestTargetAt ?? Number.NEGATIVE_INFINITY);
+    return this.mdrSoundFontQueue.pendingCount === 0
+      && this.graph.context.currentTime >= lastEventAt + MDR_MIDI_RELEASE_SECONDS;
+  }
+
+  private isMdrMidiPlaybackDrained(): boolean {
+    return this.mdrMidiTimelineComplete && this.hasMdrMidiTailElapsed();
+  }
+
   private startMdrMidiTimeline(events: readonly ScheduledMdrMidiEvent[], startsAt: number, loopWindow?: MdrMidiLoopWindow) {
     if (!events.length) {
       this.mdrMidiTimelineComplete = true;
@@ -2345,7 +2379,7 @@ export class SignalDeckAudio {
     const loopStartIndex = safeLoopWindow ? timelineEvents.findIndex((event) => event.at >= safeLoopWindow.startSeconds) : 0;
     let cursor = 0;
     let cycle = 0;
-    let hardwareClockOffsetSeconds: number | undefined;
+    const midiClock = new MdrPlaybackClock();
     this.mdrMidiTimelineComplete = false;
     this.lastMidiSyncUpdateAt = Number.NEGATIVE_INFINITY;
     const pump = () => {
@@ -2356,16 +2390,9 @@ export class SignalDeckAudio {
       }
       const elapsed = Math.max(0, context.currentTime - startsAt);
       const hardwareMilliseconds = this.mdrPlayer?.getPlayAtMilliseconds() ?? null;
-      // MXDRV's playhead begins advancing while the ScriptProcessor's initial
-      // output block is buffered. Capture that fixed offset once, then keep
-      // unqueued GS MIDI events locked to the live OPM/PCM song position.
-      if (hardwareMilliseconds !== null) {
-        const rawHardwareSeconds = hardwareMilliseconds / 1000;
-        hardwareClockOffsetSeconds ??= rawHardwareSeconds - elapsed;
-      }
-      const hardwareElapsed = hardwareMilliseconds === null || hardwareClockOffsetSeconds === undefined
-        ? elapsed
-        : Math.max(0, hardwareMilliseconds / 1000 - hardwareClockOffsetSeconds);
+      // Keep the initial buffering offset while OPM/PCM runs. After its shorter
+      // ending, advance from that final song position on the live audio clock.
+      const hardwareElapsed = midiClock.read(elapsed, hardwareMilliseconds, this.mdrPlayer?.isTerminated() ?? false);
       if (infinite && safeLoopWindow && cursor >= timelineEvents.length && loopStartIndex >= 0) {
         const nextCycleBoundary = safeLoopWindow.endSeconds + cycle * safeLoopPeriod;
         if (hardwareElapsed + lookaheadSeconds >= nextCycleBoundary) {
@@ -2386,8 +2413,10 @@ export class SignalDeckAudio {
           cursor -= 1;
           break;
         }
+        const targetAt = resolveMdrMidiLiveTargetAtSeconds(context.currentTime, hardwareElapsed, mostRecentDispatchAt);
+        // Muting a track must not shorten the song's finite timeline.
+        this.mdrMidiLastEventAt = Math.max(this.mdrMidiLastEventAt ?? 0, targetAt);
         if (!this.mutedMdrTracks.has(event.sourceTrack) && !shouldSkipMdrMidiEventAtLoopCycle(event.bytes, cycle)) {
-          const targetAt = resolveMdrMidiLiveTargetAtSeconds(context.currentTime, hardwareElapsed, mostRecentDispatchAt);
           if (hardwareOutput) this.sendMdrMidi(event.bytes, event.sourceTrack, this.externalMidiAdvanceMs, targetAt);
           else this.queueSoundFontMdrMidi(event.bytes, event.sourceTrack, targetAt, playbackGeneration, shouldScheduleMdrMidiDirectlyAtLoopStart(infinite, cycle, safeLoopWindow ? event.at - safeLoopWindow.startSeconds : event.at, lookaheadSeconds));
         }
@@ -2446,6 +2475,7 @@ export class SignalDeckAudio {
     this.mdrMidiTimer = undefined;
     this.mdrSoundFontQueue.clear();
     this.mdrMidiTimelineComplete = true;
+    this.mdrMidiLastEventAt = null;
     this.timers.forEach((timer) => window.clearTimeout(timer));
     this.timers = [];
     if (this.endTimer) window.clearTimeout(this.endTimer);
@@ -2557,6 +2587,7 @@ export class SignalDeckAudio {
       : undefined;
     let startsAt = fallbackStartsAt;
     let midiTimelineStarted = false;
+    let hardwareEndAt: number | undefined;
     const startMidiTimeline = (audibleStartAt?: number) => {
       if (midiTimelineStarted) return;
       midiTimelineStarted = true;
@@ -2569,6 +2600,11 @@ export class SignalDeckAudio {
         const left = event.outputBuffer.getChannelData(0);
         const right = event.outputBuffer.getChannelData(1);
         const peak = this.mdrPlayer?.renderInto(left, right) ?? 0;
+        if (hardwareEndAt === undefined && this.mdrPlayer?.isTerminated()) {
+          const playbackTime = Number((event as AudioProcessingEvent).playbackTime);
+          const blockStartsAt = Number.isFinite(playbackTime) ? Math.max(context.currentTime, playbackTime) : context.currentTime;
+          hardwareEndAt = blockStartsAt + left.length / context.sampleRate;
+        }
         this.noteAudioCallback("opm", left.length);
         if (this.shouldPublishRealtimeVisuals()) {
           this.outputPeakListener?.(peak);
@@ -2595,19 +2631,25 @@ export class SignalDeckAudio {
       startMidiTimeline(fallbackStartsAt);
     }
     this.lastProgressUpdateAt = Number.NEGATIVE_INFINITY;
+    const progressClock = new MdrPlaybackClock(false);
     let frame = 0;
+    const finish = () => {
+      if (!isCurrentPlaybackGeneration(playbackGeneration, this.playbackGeneration)) return;
+      cancelAnimationFrame(frame);
+      this.stop();
+      this.publishProgress(onProgress, songInfo.duration, true);
+      onEnd();
+    };
     const animate = () => {
       if (!isCurrentPlaybackGeneration(playbackGeneration, this.playbackGeneration)) return;
       const hardwareMilliseconds = needsHardwareRenderer ? this.mdrPlayer?.getPlayAtMilliseconds() ?? null : null;
-      const elapsed = hardwareMilliseconds !== null && Number.isFinite(hardwareMilliseconds)
-        ? Math.max(0, hardwareMilliseconds / 1000)
-        : Math.max(0, context.currentTime - startsAt);
+      const hardwareTerminated = needsHardwareRenderer && (this.mdrPlayer?.isTerminated() ?? false);
+      const elapsed = progressClock.read(context.currentTime - startsAt, hardwareMilliseconds, hardwareTerminated);
       const displayedElapsed = songInfo.duration > 0 && loops !== 1 ? elapsed % songInfo.duration : Math.min(songInfo.duration, elapsed);
       this.publishProgress(onProgress, displayedElapsed);
-      if (loops > 0 && shouldEndFiniteMdrPlayback(needsHardwareRenderer, this.mdrPlayer?.isTerminated() ?? false, this.mdrMidiTimelineComplete)) {
-        this.stop();
-        this.publishProgress(onProgress, songInfo.duration, true);
-        onEnd();
+      const hardwareDrained = hardwareTerminated && hardwareEndAt !== undefined && context.currentTime >= hardwareEndAt;
+      if (loops > 0 && midiTimelineStarted && shouldEndFiniteMdrPlayback(needsHardwareRenderer, hardwareDrained, this.isMdrMidiPlaybackDrained())) {
+        finish();
         return;
       }
       frame = requestAnimationFrame(animate);
@@ -2623,13 +2665,23 @@ export class SignalDeckAudio {
       const endDelaySeconds = needsHardwareRenderer && !midiBoundaryIsReliable
         ? resolveMdrPlaybackFailsafeSeconds(totalPlaybackDuration)
         : totalPlaybackDuration + 0.12;
-      this.endTimer = window.setTimeout(() => {
+      const checkFiniteEnd = () => {
         if (!isCurrentPlaybackGeneration(playbackGeneration, this.playbackGeneration)) return;
-        cancelAnimationFrame(frame);
-        this.stop();
-        this.publishProgress(onProgress, songInfo.duration, true);
-        onEnd();
-      }, endDelaySeconds * 1000);
+        const now = context.currentTime;
+        const boundaryReached = now >= startsAt + endDelaySeconds;
+        const failsafeReached = now >= startsAt + resolveMdrPlaybackFailsafeSeconds(totalPlaybackDuration);
+        const hardwareTailElapsed = hardwareEndAt === undefined || now >= hardwareEndAt;
+        // A finite L boundary may end an intentionally looping MXDRV core, but
+        // never discard known queued MIDI or its release tail. The larger
+        // failsafe still bounds a broken/unstarted timeline with no output left.
+        if (boundaryReached && hardwareTailElapsed && this.hasMdrMidiTailElapsed()
+          && ((midiTimelineStarted && this.mdrMidiTimelineComplete) || failsafeReached)) {
+          finish();
+          return;
+        }
+        this.endTimer = window.setTimeout(checkFiniteEnd, 50);
+      };
+      this.endTimer = window.setTimeout(checkFiniteEnd, endDelaySeconds * 1000);
     }
     return songInfo;
   }

@@ -30,6 +30,16 @@ export class OrderedMidiQueue<Event, TimerHandle = number> {
     private readonly options: OrderedMidiQueueOptions<Event, TimerHandle>
   ) {}
 
+  /** Messages not yet handed to the audio scheduler; zero does not mean they have played. */
+  get pendingCount(): number {
+    return this.entries.length - this.head;
+  }
+
+  /** Latest effective playback deadline, retained after dispatch until clear(). */
+  get latestTargetAt(): number | null {
+    return this.lastTargetAt === Number.NEGATIVE_INFINITY ? null : this.lastTargetAt;
+  }
+
   /** Early events may be handed to an audio scheduler as soon as all prior messages are dispatched. */
   enqueue(event: Event, targetAt: number, early = false): void {
     const finiteTarget = Number.isFinite(targetAt)
