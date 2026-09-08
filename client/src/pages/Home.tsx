@@ -967,7 +967,9 @@ export default function Home() {
 
   async function selectSoundFont(event: ChangeEvent<HTMLInputElement>) {
     const soundfont = event.target.files?.[0];
+    event.target.value = "";
     if (!soundfont) return;
+    const previousName = soundfontName;
     setSoundfontName("Loading SoundFont…");
     try {
       const data = await soundfont.arrayBuffer();
@@ -982,7 +984,7 @@ export default function Home() {
       setRemoteSoundfontProgress({ loadedBytes: soundfont.size, totalBytes: soundfont.size, stage: "ready" });
       setNotice("GS MIDI出力用のSoundFontを読み込みました。次回訪問時もこのブラウザから自動復元します。");
     } catch (error) {
-      setSoundfontName("SoundFont load failed");
+      setSoundfontName(soundFontByteLength > 0 ? previousName : "SoundFont load failed");
       setNotice(error instanceof Error ? `SoundFontを読み込めませんでした: ${error.message}` : "SoundFontを読み込めませんでした。");
       setRemoteSoundfontProgress(current => current ? { ...current, stage: "failed" } : { loadedBytes: 0, totalBytes: null, stage: "failed" });
     }
@@ -990,6 +992,7 @@ export default function Home() {
 
   async function loadRemoteSoundFont(sourceUrl = remoteSoundfontUrl, options: { persistSelection?: boolean } = {}) {
     const persistSelection = options.persistSelection ?? true;
+    const previousName = soundfontName;
     setRemoteSoundfontLoading(true);
     setSoundfontName("Loading remote SoundFont…");
     setRemoteSoundfontProgress({ loadedBytes: 0, totalBytes: null, stage: "downloading" });
@@ -1021,7 +1024,7 @@ export default function Home() {
           : "共有セッション指定のSoundFontを一時適用しました。別の曲を読み込むと、保存済みのSoundFontへ戻ります。");
       setRemoteSoundfontProgress({ loadedBytes: downloadedBytes, totalBytes: downloadedBytes, stage: "ready" });
     } catch (error) {
-      setSoundfontName("Remote SoundFont load failed");
+      setSoundfontName(soundFontByteLength > 0 ? previousName : "Remote SoundFont load failed");
       setNotice(error instanceof Error ? error.message : "リモートSoundFontを読み込めませんでした。");
       setRemoteSoundfontProgress(current => current ? { ...current, stage: "failed" } : { loadedBytes: 0, totalBytes: null, stage: "failed" });
     } finally {
@@ -1859,7 +1862,7 @@ export default function Home() {
                       <p className="mono mb-0 mt-2 truncate text-[8px] uppercase tracking-[0.08em] text-[#c2d6f4]">{soundFontProfileKey ? `Bank profile · ${soundfontName}` : "Common profile · no SoundFont selected"}</p>
                       <dl className="mt-3 grid gap-2 border-y border-white/10 py-3 text-[9px] sm:grid-cols-2">
                         <div><dt className="mono flex items-center gap-1 text-[#8b9085]">推奨<HelpTooltip label="SoundFont補正の推奨値">{soundFontMdrDelayRecommendation.reason}</HelpTooltip></dt><dd data-testid="soundfont-timing-recommended" className="mono m-0 mt-1 text-[#f5f4ec]">{soundFontMdrDelayRecommendation.totalMs >= 0 ? "+" : ""}{soundFontMdrDelayRecommendation.totalMs} ms</dd></div>
-                        <div><dt className="mono flex items-center gap-1 text-[#8b9085]">実測<HelpTooltip label="SoundFont補正の実測値">{soundFontMdrDelayMeasurement ? `残差 ${soundFontMdrDelayMeasurement.residualMs >= 0 ? "+" : ""}${Math.round(soundFontMdrDelayMeasurement.residualMs)} ms · ${soundFontMdrDelayMeasurement.sampleCount} samples` : "MDR再生中に MXDRV クロックで推定"}</HelpTooltip></dt><dd data-testid="soundfont-timing-measured" className="mono m-0 mt-1 text-[#f5f4ec]">{soundFontMdrDelayMeasurement ? `${soundFontMdrDelayMeasurement.suggestedTotalMs >= 0 ? "+" : ""}${Math.round(soundFontMdrDelayMeasurement.suggestedTotalMs)} ms` : isPlaying && mdrInfo?.hardwareTracks ? "計測中…" : "—"}</dd></div>
+                        <div><dt className="mono flex items-center gap-1 text-[#8b9085]">補正の推定<HelpTooltip label="SoundFont補正の推定値">{soundFontMdrDelayMeasurement ? `残差 ${soundFontMdrDelayMeasurement.residualMs >= 0 ? "+" : ""}${Math.round(soundFontMdrDelayMeasurement.residualMs)} ms · ${soundFontMdrDelayMeasurement.sampleCount} samples` : "予約の処理遅延と音色のアタック差は別です。処理遅延から発音補正は算出せず、A/B試聴で確認してください。"}</HelpTooltip></dt><dd data-testid="soundfont-timing-measured" className="mono m-0 mt-1 text-[#f5f4ec]">{soundFontMdrDelayMeasurement ? `${soundFontMdrDelayMeasurement.suggestedTotalMs >= 0 ? "+" : ""}${Math.round(soundFontMdrDelayMeasurement.suggestedTotalMs)} ms` : "—"}</dd></div>
                       </dl>
                       <div className="mt-2 flex flex-wrap gap-2"><button type="button" data-testid="soundfont-timing-apply-recommended" onClick={() => changeSoundFontMdrDelay(soundFontMdrDelayRecommendation.totalMs)} className="mono border border-white/20 px-2.5 py-2 text-[8px] uppercase tracking-[0.08em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary">推奨を適用</button>{soundFontMdrDelayMeasurement && <button type="button" data-testid="soundfont-timing-apply-measured" onClick={() => changeSoundFontMdrDelay(Math.round(soundFontMdrDelayMeasurement.suggestedTotalMs))} className="mono border border-[#8fa7cc]/45 px-2.5 py-2 text-[8px] uppercase tracking-[0.08em] text-[#c2d6f4] transition-colors hover:border-primary hover:text-primary">実測を適用</button>}</div>
                       <label className="mt-2 block"><span className="mono text-[9px] text-[#dfe1d8]">発音補正</span><div className="mt-1 flex items-stretch gap-2"><input aria-label="SoundFont MDR発音補正 ms" type="text" inputMode="text" autoComplete="off" value={soundFontMdrDelayDraft} onChange={(event) => updateSoundFontMdrDelayDraft(event.target.value)} onBlur={commitSoundFontMdrDelayDraft} className="mono min-w-0 flex-1 border border-white/15 bg-[#11120f] px-2.5 py-2 text-[10px] text-[#f5f4ec] outline-none focus:border-primary" /><span className="mono self-center text-[9px] text-[#c2d6f4]">ms</span><span className="grid shrink-0 overflow-hidden border border-white/15 bg-[#11120f]"><button type="button" aria-label="SoundFont MDR発音補正を1 ms増やす" data-testid="soundfont-timing-step-up" onClick={() => stepSoundFontMdrDelay(1)} className="mono grid h-4 w-6 place-items-center border-b border-white/15 text-[9px] leading-none text-[#dfe1d8] transition-colors hover:bg-primary hover:text-primary-foreground active:scale-[0.97]">▲</button><button type="button" aria-label="SoundFont MDR発音補正を1 ms減らす" data-testid="soundfont-timing-step-down" onClick={() => stepSoundFontMdrDelay(-1)} className="mono grid h-4 w-6 place-items-center text-[9px] leading-none text-[#dfe1d8] transition-colors hover:bg-primary hover:text-primary-foreground active:scale-[0.97]">▼</button></span></div></label>
@@ -1899,7 +1902,7 @@ export default function Home() {
                   <div className="bg-[#11120f] px-3 py-2"><SmallLabel help={<>{timerBHint}</>}>Timer-B / OPM reg 12</SmallLabel><p aria-label="Timer-B値" className="mono m-0 mt-0.5 text-xl leading-tight text-[#f5f4ec]">{timerB === null ? "—" : `0x${timerB.toString(16).padStart(2, "0").toUpperCase()}`}</p></div>
                   <div className="bg-[#11120f] px-3 py-2"><SmallLabel help={<>WASM renderer matched</>}>Audio clock / synced</SmallLabel><p aria-label="再生クロック" className="mono m-0 mt-0.5 text-xl leading-tight text-[#f5f4ec]">{(audioSampleRate / 1000).toFixed(1)} kHz</p></div>
                   <div className="bg-[#11120f] px-3 py-2"><SmallLabel help={<>live OPM / PCM clock</>}>MXDRV playhead</SmallLabel><p aria-label="MXDRV再生位置" className="mono m-0 mt-0.5 text-xl leading-tight text-[#f5f4ec]">{hardwarePlaybackPositionMs === null ? "—" : formatTime(hardwarePlaybackPositionMs / 1000)}</p></div>
-                  <div className="bg-[#11120f] px-3 py-2"><SmallLabel help={<>event scheduled against same clock</>}>GS MIDI / MXDRV delta</SmallLabel><p aria-label="GS MIDI同期差" className="mono m-0 mt-0.5 text-xl leading-tight text-[#f5f4ec]">{mdrMidiClockDeltaMs === null ? "—" : `${mdrMidiClockDeltaMs >= 0 ? "+" : ""}${mdrMidiClockDeltaMs.toFixed(0)} ms`}</p></div>
+                  <div className="bg-[#11120f] px-3 py-2"><SmallLabel help={<>MIDIの予約時刻からSoundFont側で適用するまでの遅れ。OPMとの実際の発音差ではありません。</>}>GS MIDI / dispatch delay</SmallLabel><p aria-label="GS MIDI同期差" className="mono m-0 mt-0.5 text-xl leading-tight text-[#f5f4ec]">{mdrMidiClockDeltaMs === null ? "—" : `${mdrMidiClockDeltaMs >= 0 ? "+" : ""}${mdrMidiClockDeltaMs.toFixed(0)} ms`}</p></div>
                 </div></CompactPanel>
       </section>
       {formatGuideOpen && <Suspense fallback={<span role="status" className="mono text-xs">ガイドを読み込み中…</span>}><FormatGuideDialog open={formatGuideOpen} onOpenChange={setFormatGuideOpen} /></Suspense>}

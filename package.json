@@ -4,9 +4,10 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "NODE_ENV=development tsx watch server/_core/index.ts",
-    "build": "vite build && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
-    "build:cloudflare": "CLOUDFLARE_BUILD=1 vite build",
+    "build:soundfont-worklet": "node scripts/build-madrv-soundfont-worklet.mjs",
+    "dev": "pnpm build:soundfont-worklet && NODE_ENV=development tsx watch server/_core/index.ts",
+    "build": "pnpm build:soundfont-worklet && vite build && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "build:cloudflare": "pnpm build:soundfont-worklet && CLOUDFLARE_BUILD=1 vite build",
     "check:cloudflare": "tsc --noEmit -p tsconfig.cloudflare.json",
     "dev:cloudflare": "pnpm build:cloudflare && wrangler dev",
     "deploy:cloudflare": "pnpm build:cloudflare && wrangler deploy",

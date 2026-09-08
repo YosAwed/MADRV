@@ -4,6 +4,7 @@ import { MdrPlaybackClock, SignalDeckAudio, type ScheduledMdrMidiEvent } from ".
 const midiFixture = vi.hoisted(() => ({
   events: [] as ScheduledMdrMidiEvent[],
   loopWindow: undefined as { startSeconds: number; endSeconds: number } | undefined,
+  sampleRate: 0,
 }));
 
 // Exercise playMdr's real transport with deterministic converter output, without
@@ -17,7 +18,8 @@ vi.mock("/manus-storage/madrv-midi-events-v4_b2d6bf6b.mjs", () => ({
       HEAPU8: heap,
       _malloc: (size: number) => { const pointer = allocation; allocation += size; return pointer; },
       _free: () => {},
-      _madrv_extract_midi: () => {
+      _madrv_extract_midi: (_pointer: number, _size: number, _loops: number, sampleRate: number) => {
+        midiFixture.sampleRate = sampleRate;
         payload = new Uint8Array(4 + midiFixture.events.reduce((size, event) => size + 16 + event.bytes.length, 0));
         const view = new DataView(payload.buffer);
         view.setUint32(0, midiFixture.events.length, true);
@@ -45,6 +47,7 @@ type EngineInternals = {
   gains: unknown;
   gsLoaded: boolean;
   gsSynth: unknown;
+  gsMidiPort?: { postMessage(message: unknown): void };
   mdrPlayer: unknown;
   mutedMdrTracks: Set<number>;
   playbackGeneration: number;
@@ -124,6 +127,7 @@ beforeEach(() => {
   vi.stubGlobal("cancelAnimationFrame", (handle: ReturnType<typeof setTimeout>) => clearTimeout(handle));
   midiFixture.events = [];
   midiFixture.loopWindow = undefined;
+  midiFixture.sampleRate = 0;
 });
 
 afterEach(() => {
@@ -265,6 +269,120 @@ describe("hybrid MIDI draining", () => {
 });
 
 describe("finite MDR transport completion", () => {
+  it("keeps the loaded SoundFont and pending notes intact when replacement is requested during playback", async () => {
+    const h = createHarness();
+    h.internal.gsMidiPort = { postMessage: vi.fn() };
+    midiFixture.events = [{ at: 0.1, sourceTrack: 16, bytes: [0x90, 60, 100] }];
+    await h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn());
+    h.process(0.5, 16_384);
+    const generation = h.internal.playbackGeneration;
+    await expect(h.engine.loadSoundFontData(new ArrayBuffer(0))).rejects.toThrow("再生を停止してからSoundFontを変更");
+    expect(h.internal.playbackGeneration).toBe(generation);
+    expect(h.internal.gsSynth).toBe(h.synth);
+    expect(h.node.disconnect).not.toHaveBeenCalled();
+  });
+
+  it("uses exact Timer-B extraction without changing the actual output sample rate", async () => {
+    const h = createHarness(44_100);
+    await h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn());
+    expect(midiFixture.sampleRate).toBe(125_000);
+    expect(h.context.sampleRate).toBe(44_100);
+  });
+
+  it("preschedules only rendered MIDI against output blocks and keeps keys on their audible timeline", async () => {
+    const h = createHarness();
+    h.engine.setPerformanceProfile("mobile");
+    const postMessage = vi.fn();
+    h.internal.gsMidiPort = { postMessage };
+    midiFixture.events = [
+      { at: 0, sourceTrack: 16, bytes: [0x90, 60, 100] },
+      { at: 0.2, sourceTrack: 16, bytes: [0x80, 60, 0] },
+      { at: 0.4, sourceTrack: 16, bytes: [0x90, 64, 100] },
+    ];
+    const keys = vi.fn();
+    h.engine.setMdrTrackKeyListener(keys);
+    await h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn());
+    keys.mockClear();
+    const messages = () => postMessage.mock.calls.map(([message]) => message).filter(message => message.type === "madrv-midi");
+    h.process(0.5, 16_384);
+    expect(messages()).toMatchObject([{ targetAt: 0.5 }, { targetAt: 0.7 }]);
+    h.advance(100);
+    expect(messages()).toHaveLength(2);
+    expect(keys).not.toHaveBeenCalled();
+    h.process(0.5 + 16_384 / 48_000, 16_384);
+    expect(messages()).toHaveLength(3);
+    expect(messages()[2].targetAt).toBeCloseTo(0.9);
+    h.advance(450);
+    expect(keys).toHaveBeenLastCalledWith({ 16: [60] });
+    h.engine.stop();
+    expect(postMessage).toHaveBeenCalledWith({ type: "madrv-reset", generation: h.internal.playbackGeneration });
+    keys.mockClear();
+    h.advance(2000);
+    expect(keys).not.toHaveBeenCalled();
+  });
+
+  it("does not let the timer advance MIDI past an unrendered OPM interval", async () => {
+    const h = createHarness();
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    h.engine.setPerformanceProfile("mobile");
+    const postMessage = vi.fn();
+    h.internal.gsMidiPort = { postMessage };
+    midiFixture.events = [{ at: 0.7, sourceTrack: 16, bytes: [0x90, 60, 100] }];
+    await h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn());
+    h.process(0.5, 16_384);
+    h.advance(1000);
+    const messages = () => postMessage.mock.calls.map(([message]) => message).filter(message => message.type === "madrv-midi");
+    expect(messages()).toEqual([]);
+    h.process(1.8, 16_384);
+    expect(messages()).toEqual([]);
+    h.process(2.2, 16_384);
+    expect(messages()).toHaveLength(1);
+    expect(messages()[0].targetAt).toBeCloseTo(2.2 + 0.7 - 32_768 / 48_000);
+    expect(warning).toHaveBeenCalledOnce();
+  });
+
+  it("does not revive cancelled keyboard notes after a quick mute and unmute", async () => {
+    const h = createHarness();
+    h.engine.setPerformanceProfile("mobile");
+    h.internal.gsMidiPort = { postMessage: vi.fn() };
+    midiFixture.events = [
+      { at: 0.1, sourceTrack: 16, bytes: [0x90, 60, 100] },
+      { at: 0.1, sourceTrack: 17, bytes: [0x91, 64, 100] },
+    ];
+    const keys = vi.fn();
+    h.engine.setMdrTrackKeyListener(keys);
+    await h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn());
+    h.process(0.5, 16_384);
+    h.advance(100);
+    h.engine.setMdrMutedTracks([16]);
+    h.advance(100);
+    h.engine.setMdrMutedTracks([]);
+    keys.mockClear();
+    h.advance(500);
+    expect(keys).toHaveBeenLastCalledWith({ 17: [64] });
+    expect(keys.mock.calls.every(([state]) => state[16] === undefined)).toBe(true);
+  });
+
+  it("preserves score order across overlapping block reports without shifting all later deadlines", async () => {
+    const h = createHarness();
+    h.engine.setPerformanceProfile("mobile");
+    const postMessage = vi.fn();
+    h.internal.gsMidiPort = { postMessage };
+    midiFixture.events = [
+      { at: 0.3, sourceTrack: 16, bytes: [0xe0, 1, 64] },
+      { at: 0.35, sourceTrack: 16, bytes: [0xe0, 0, 64] },
+      { at: 0.5, sourceTrack: 16, bytes: [0x90, 60, 100] },
+    ];
+    await h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn());
+    h.process(1, 16_384);
+    h.process(1.25, 16_384);
+    const messages = postMessage.mock.calls.map(([message]) => message).filter(message => message.type === "madrv-midi");
+    expect(messages.map(message => message.bytes)).toEqual(midiFixture.events.map(event => event.bytes));
+    expect(messages[0].targetAt).toBeCloseTo(1.3);
+    expect(messages[1].targetAt).toBeCloseTo(1.3);
+    expect(messages[2].targetAt).toBeCloseTo(1.25 + 0.5 - 16_384 / 48_000);
+  });
+
   it("keeps progress and trailing MIDI running after the hardware ends, then finishes naturally", async () => {
     const h = createHarness();
     midiFixture.events = [
@@ -310,17 +428,18 @@ describe("finite MDR transport completion", () => {
 
   it("does not let the finite-loop timer truncate pending MIDI or its late release", async () => {
     const h = createHarness();
+    h.engine.setPerformanceProfile("mobile");
     h.hardware.duration = 1;
-    midiFixture.events = [{ at: 0.9, sourceTrack: 16, bytes: [0x80, 60, 0] }];
+    midiFixture.events = [{ at: 0.3, sourceTrack: 16, bytes: [0x80, 60, 0] }];
     midiFixture.loopWindow = { startSeconds: 0, endSeconds: 1 };
     const onEnd = vi.fn();
     await h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), onEnd);
-    h.process(0);
-    h.advance(760);
+    h.process(0, 16_384);
+    h.advance(100);
     expect(h.internal.mdrSoundFontQueue.pendingCount).toBe(1);
-    // Simulate a late queue dispatch at audio t=3 rather than its original 0.9.
+    // Simulate a late queue dispatch at audio t=3 rather than its original 0.3.
     h.forceAudioTime(3);
-    h.advance(1800);
+    h.advance(2450);
     expect(h.synth.noteOff).toHaveBeenCalledOnce();
     expect(h.internal.mdrMidiLastEventAt).toBe(3);
     expect(onEnd).not.toHaveBeenCalled();

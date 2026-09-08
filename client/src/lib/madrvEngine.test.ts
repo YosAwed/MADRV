@@ -360,14 +360,20 @@ describe("SoundFont MDR timing correction", () => {
     expect(resolveMdrPlaybackFailsafeSeconds(0)).toBe(60);
   });
 
-  it("recommends a browser-local SoundFont delay from the active audio path", () => {
+  it("starts frame-aligned SoundFont timing at zero instead of treating lookahead as audible skew", () => {
     const desktop = recommendSoundFontMdrDelayMs({ profile: "desktop", sampleRate: 48_000, outputLatencySeconds: 0.04, baseLatencySeconds: 0.01 });
     expect(desktop.rendererMs).toBe(43);
     expect(desktop.lookaheadMs).toBe(150);
-    expect(desktop.totalMs).toBeLessThan(0);
+    expect(desktop.totalMs).toBe(0);
     const mobile = recommendSoundFontMdrDelayMs({ profile: "mobile", sampleRate: 44_100, frameP95Ms: 40 });
     expect(mobile.rendererMs).toBeGreaterThan(300);
-    expect(mobile.totalMs).toBeGreaterThan(0);
+    expect(mobile.totalMs).toBe(0);
+  });
+
+  it("reports Worklet application lateness without recommending it as an acoustic correction", () => {
+    const snapshot = { kind: "worklet-dispatch" as const, scheduledSeconds: 10, dispatchedSeconds: 10.002, hardwareMilliseconds: 9000 };
+    expect(resolveSoundFontMdrSyncResidualMs(snapshot)).toBeCloseTo(2);
+    expect(updateSoundFontMdrDelayMeasurement(null, snapshot, 100)).toBeNull();
   });
 
   it("smooths live MXDRV sync residuals into a suggested total correction", () => {
@@ -487,8 +493,12 @@ describe("AudioContext clock synchronization", () => {
     expect(resolvePlaybackSampleRate(Number.NaN)).toBe(48_000);
   });
 
-  it("keeps MDR GS MIDI timing on the 48 kHz MXDRV core despite output resampling", () => {
-    expect(resolveMdrMidiTimingSampleRate()).toBe(48_000);
+  it("represents every Timer-B tick exactly on a virtual MIDI clock independent of audio output", () => {
+    expect(resolveMdrMidiTimingSampleRate()).toBe(125_000);
+    for (let timerB = 0; timerB <= 255; timerB += 1) {
+      const tickFrames = (256 - timerB) * 256 * resolveMdrMidiTimingSampleRate() / 1_000_000;
+      expect(Number.isInteger(tickFrames)).toBe(true);
+    }
   });
 
   it("queues SoundFont MIDI ahead of the main-thread deadline with a bounded pump cadence", () => {

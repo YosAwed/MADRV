@@ -1,4 +1,5 @@
 import { OrderedMidiQueue } from "./orderedMidiQueue";
+import { MdrAudioTimeline } from "./mdrAudioTimeline";
 
 /* Signal Deck engine: MML is synthesized locally; MDR inspection follows the mpxadrv header and 32-track layout. */
 export type EngineKind = "opm" | "pcm" | "midi";
@@ -170,9 +171,14 @@ export function resolvePlaybackSampleRate(sampleRate: number): number {
   return Number.isFinite(sampleRate) && sampleRate >= 8_000 && sampleRate <= 192_000 ? Math.round(sampleRate) : 48_000;
 }
 
-/** MIDI tick timing must use the fixed MXDRV core clock, not a resampled AudioContext output rate. */
+/**
+ * Virtual clock used only by the offline MIDI extractor, not an audio rate.
+ * A YM2151 Timer-B tick is (256 - register) * 256 microseconds. At 125 kHz
+ * every possible tick is an integer number of frames; 48 kHz truncates a
+ * fractional frame on every tick and gradually accelerates the MIDI score.
+ */
 export function resolveMdrMidiTimingSampleRate(): number {
-  return MADRV_NATIVE_SAMPLE_RATE;
+  return 125_000;
 }
 
 /** Positive values send hardware MIDI earlier; negative values intentionally defer it. */
@@ -265,23 +271,23 @@ export function recommendSoundFontMdrDelayMs(input: {
   const baseMs = Math.max(0, (input.baseLatencySeconds ?? 0) * 1000);
   const lookaheadMs = resolveMdrMidiLookaheadSeconds(input.profile) * 1000;
   const synthMs = input.profile === "mobile" ? 35 : 20;
-  const framePenalty = input.frameP95Ms !== undefined && input.frameP95Ms > 25
-    ? Math.round((input.frameP95Ms - 25) * 0.8)
-    : 0;
-  const rawMs = rendererMs + outputMs + baseMs + synthMs + framePenalty - lookaheadMs;
-  const totalMs = normalizeSoundFontMdrDelayMs(Math.round(rawMs));
+  // Both engines now target the same rendered output frames. Buffer duration,
+  // output latency and lookahead are shared scheduling costs, not audible skew.
+  const totalMs = 0;
   return {
     totalMs,
     rendererMs: Math.round(rendererMs),
     outputMs: Math.round(outputMs + baseMs),
     lookaheadMs: Math.round(lookaheadMs),
     synthMs,
-    reason: `OPM ${Math.round(rendererMs)} ms + 出力 ${Math.round(outputMs + baseMs)} ms + SF ${synthMs} ms − 先行 ${Math.round(lookaheadMs)} ms${framePenalty ? ` + UI ${framePenalty} ms` : ""}`,
+    reason: "OPM／PCMと同じ出力フレームへ予約するため、基準値は0 msです。音色固有のアタック差はA/B試聴で調整してください。",
   };
 }
 
-/** Residual OPM-vs-GS skew on the offset-corrected MXDRV song clock; positive means GS MIDI is audibly early. */
+/** Legacy MXDRV clock residual, or Worklet application lateness (not acoustic skew). */
 export function resolveSoundFontMdrSyncResidualMs(snapshot: MdrMidiSyncSnapshot | null | undefined): number | null {
+  if (snapshot?.kind === "worklet-dispatch") return Number.isFinite(snapshot.dispatchedSeconds) && Number.isFinite(snapshot.scheduledSeconds)
+    ? Math.max(0, snapshot.dispatchedSeconds - snapshot.scheduledSeconds) * 1000 : null;
   if (!snapshot || snapshot.hardwareMilliseconds === null || !Number.isFinite(snapshot.dispatchedSeconds) || !Number.isFinite(snapshot.scheduledSeconds)) return null;
   // `hardwareMilliseconds` is the raw core playhead and includes the initial
   // ScriptProcessor/output-buffer offset. `dispatchedSeconds` is the same
@@ -304,6 +310,9 @@ export function updateSoundFontMdrDelayMeasurement(
   snapshot: MdrMidiSyncSnapshot | null | undefined,
   currentCorrectionMs: number,
 ): SoundFontMdrDelayMeasurement | null {
+  // Scheduler deadline misses are not an acoustic OPM-vs-SoundFont offset and
+  // must never be turned into a recommendation to shift the musical timeline.
+  if (snapshot?.kind === "worklet-dispatch") return null;
   const residualMs = resolveSoundFontMdrSyncResidualMs(snapshot);
   if (residualMs === null) return previous;
   const suggestedTotalMs = normalizeSoundFontMdrDelayMs(Math.round(residualMs + currentCorrectionMs));
@@ -897,6 +906,19 @@ export type MdrMidiSyncSnapshot = {
   scheduledSeconds: number;
   dispatchedSeconds: number;
   hardwareMilliseconds: number | null;
+  kind?: "worklet-dispatch";
+};
+
+export type MdrMidiSchedulingStats = {
+  generation: number;
+  appliedCount: number;
+  lateCount: number;
+  maxLateSeconds: number;
+  receivedLateCount: number;
+  maxReceiptLateSeconds: number;
+  lastTargetAt: number | null;
+  lastAppliedAt: number | null;
+  pendingCount: number;
 };
 
 /**
@@ -1042,7 +1064,7 @@ const PLAYER_MODULE_URL = "/manus-storage/madrv-mdx-player-v12_fde3ce0c.mjs";
 const PLAYER_WASM_URL = "/manus-storage/madrv-mdx-player-v12_2d6b7625.wasm";
 const MIDI_EVENTS_MODULE_URL = "/manus-storage/madrv-midi-events-v4_b2d6bf6b.mjs";
 const MIDI_EVENTS_WASM_URL = "/manus-storage/madrv-midi-events-v4_2facde2d.wasm";
-const SPESSA_PROCESSOR_URL = "/manus-storage/spessasynth-processor.min_0ece0471.js";
+const SPESSA_PROCESSOR_URL = "/manus-storage/madrv-spessasynth-processor.js";
 const MDX_WORKLET_PROCESSOR_URL = "/manus-storage/madrv-mdx-worklet-bundled_e8ea643e.js";
 
 const GS_RESET = [0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7f, 0x00, 0x41, 0xf7];
@@ -1761,7 +1783,7 @@ class MadrvWasmPlayer {
 export async function estimateMdrPlaybackDuration(mdr: ArrayBuffer, pdx: ArrayBuffer | undefined): Promise<number> {
   const player = new MadrvWasmPlayer();
   const hardware = await player.load(mdr, pdx, 1, 48_000);
-  const midiTimeline = await extractMdrMidiEvents(mdr, 1, 48_000);
+  const midiTimeline = await extractMdrMidiEvents(mdr, 1, resolveMdrMidiTimingSampleRate());
   return resolveMdrPlaybackDuration(hardware.duration, midiTimeline.events, midiTimeline.loopWindow);
 }
 
@@ -1779,13 +1801,30 @@ export class SignalDeckAudio {
     cancel: (timer) => window.clearTimeout(timer),
     dispatch: ({ bytes, sourceTrack, playbackGeneration }, targetAt) => {
       if (!shouldDispatchQueuedSoundFontMdrEvent(playbackGeneration, this.playbackGeneration, this.gsLoaded)) return;
-      this.sendMdrMidi(bytes, sourceTrack, 0, Math.max(this.graph.context.currentTime, targetAt));
+      // Preserve the original deadline for the cancellable Worklet so its
+      // receipt/application telemetry exposes late main-thread submissions.
+      this.sendMdrMidi(bytes, sourceTrack, 0, this.gsMidiPort ? targetAt : Math.max(this.graph.context.currentTime, targetAt));
     },
   });
   private endTimer?: number;
   private mdrMidiAnimationFrame?: number;
   private mdrMidiTimer?: number;
   private mdrMidiTimelineComplete = true;
+  private mdrAudioTimeline?: MdrAudioTimeline;
+  private mdrMidiPump?: () => void;
+  private gsMidiPort?: MessagePort;
+  private mdrMidiSchedulingStats: MdrMidiSchedulingStats | null = null;
+  private mdrMidiMuteVersions = new Map<number, number>();
+  /** Keyboard telemetry follows playback time even when audio is reserved a full block ahead. */
+  private mdrMidiVisualQueue = new OrderedMidiQueue<{ bytes: number[]; sourceTrack: number; generation: number; muteVersion: number }>({
+    now: () => this.graph.context.currentTime,
+    schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+    cancel: timer => window.clearTimeout(timer),
+    dispatch: ({ bytes, sourceTrack, generation, muteVersion }) => {
+      if (generation === this.playbackGeneration && muteVersion === (this.mdrMidiMuteVersions.get(sourceTrack) ?? 0)
+        && !this.mutedMdrTracks.has(sourceTrack)) this.updateMdrMidiTrackKeys(bytes, sourceTrack);
+    },
+  });
   /** Latest planned or actually submitted MIDI timestamp, including late dispatch. */
   private mdrMidiLastEventAt: number | null = null;
   private gsSynth?: GsSynth;
@@ -2184,13 +2223,22 @@ export class SignalDeckAudio {
   getDiagnostics() { return [...this.diagnostics]; }
 
   setMdrMutedTracks(trackIndexes: number[]) {
-    this.mutedMdrTracks = new Set(trackIndexes.filter((index) => index >= 0 && index < 32));
+    const muted = new Set(trackIndexes.filter((index) => index >= 0 && index < 32));
+    for (const track of Array.from(muted)) {
+      if (this.mutedMdrTracks.has(track)) continue;
+      // The Worklet cancels this track's future notes. Its visual reservations
+      // must stay cancelled even if the user unmutes before their deadline.
+      this.mdrMidiMuteVersions.set(track, (this.mdrMidiMuteVersions.get(track) ?? 0) + 1);
+      if (this.gsMidiPort && track >= 16) delete this.mdrTrackKeys[track];
+    }
+    this.mutedMdrTracks = muted;
     const hardwareMask = trackIndexes.filter((index) => index >= 0 && index < 16).reduce((mask, index) => mask | (1 << index), 0);
     // MXDRV returns one mixed OPM/PCM stream. ChannelMask only controls muted
     // tracks; it does not expose separate PCM stems, so a second player would
     // emit the same score again and eventually phase against the first.
     this.mdrPlayer?.setChannelMask(hardwareMask);
     this.mdrWorklet?.port.postMessage({ type: "channel-mask", mask: hardwareMask });
+    this.gsMidiPort?.postMessage({ type: "madrv-mute", generation: this.playbackGeneration, tracks: Array.from(this.mutedMdrTracks) });
     this.publishMdrTrackKeys(true);
   }
 
@@ -2218,17 +2266,43 @@ export class SignalDeckAudio {
     }
   }
 
+  private assertSoundFontCanBeReplaced() {
+    if (this.mdrNode || this.mdrWorklet || this.mdrMidiPump || !this.isMdrMidiPlaybackDrained()) {
+      throw new Error("予約済みの音を失わないよう、再生を停止してからSoundFontを変更してください。");
+    }
+  }
+
   async loadSoundFontData(data: ArrayBuffer): Promise<void> {
+    this.assertSoundFontCanBeReplaced();
     const { context, gains } = this.graph;
     await this.ensureSpessaWorklet();
     const module = await import("spessasynth_lib");
-    const synth = new module.WorkletSynthesizer(context) as unknown as GsSynth;
+    let port: MessagePort | undefined;
+    const synth = new module.WorkletSynthesizer(context, {
+      audioNodeCreators: { worklet: (audioContext, _name, options) => {
+        const node = new AudioWorkletNode(audioContext, "madrv-spessasynth-worklet", options);
+        port = node.port;
+        // Install before the library's handler; our private telemetry is not a
+        // SpessaSynth protocol message and must not reach that handler.
+        node.port.addEventListener("message", event => {
+          if (event.data?.type !== "madrv-midi-timing") return;
+          event.stopImmediatePropagation();
+          if (this.gsMidiPort === node.port) this.handleMdrMidiTiming(event.data);
+        });
+        return node;
+      } },
+    }) as unknown as GsSynth;
     try {
       await synth.isReady;
       synth.connect(gains.midi);
       await synth.soundBankManager.addSoundBank(data, "user-gs");
+      // Playback may have begun with the old bank while this one was loading.
+      // Swapping its Worklet would discard already-reserved notes and CC state.
+      this.assertSoundFontCanBeReplaced();
       this.gsSynth?.destroy();
       this.gsSynth = synth;
+      this.gsMidiPort = port;
+      this.resetMdrMidiScheduler();
       this.gsLoaded = true;
     } catch (error) {
       synth.destroy();
@@ -2319,6 +2393,13 @@ export class SignalDeckAudio {
   private sendMdrMidi(bytes: number[], sourceTrack: number, advanceMs = 0, scheduleAt?: number) {
     if (bytes.length === 0) return;
     this.mdrMidiLastEventAt = Math.max(this.mdrMidiLastEventAt ?? 0, this.graph.context.currentTime, scheduleAt ?? 0);
+    if (this.gsMidiPort && !this.midiOutput) {
+      const targetAt = scheduleAt ?? this.graph.context.currentTime;
+      this.gsMidiPort.postMessage({ type: "madrv-midi", generation: this.playbackGeneration, sourceTrack, bytes, targetAt });
+      if ((bytes[0] & 0xe0) === 0x80) this.mdrMidiVisualQueue.enqueue({ bytes, sourceTrack, generation: this.playbackGeneration,
+        muteVersion: this.mdrMidiMuteVersions.get(sourceTrack) ?? 0 }, targetAt);
+      return;
+    }
     this.updateMdrMidiTrackKeys(bytes, sourceTrack);
     if (this.midiOutput) {
       const correction = normalizeExternalMidiAdvanceMs(advanceMs);
@@ -2359,6 +2440,23 @@ export class SignalDeckAudio {
     return this.mdrMidiTimelineComplete && this.hasMdrMidiTailElapsed();
   }
 
+  getMdrMidiSchedulingStats(): MdrMidiSchedulingStats | null {
+    return this.mdrMidiSchedulingStats ? { ...this.mdrMidiSchedulingStats } : null;
+  }
+
+  private resetMdrMidiScheduler() {
+    this.mdrMidiSchedulingStats = null;
+    this.gsMidiPort?.postMessage({ type: "madrv-reset", generation: this.playbackGeneration });
+    this.gsMidiPort?.postMessage({ type: "madrv-mute", generation: this.playbackGeneration, tracks: Array.from(this.mutedMdrTracks) });
+  }
+
+  private handleMdrMidiTiming(data: MdrMidiSchedulingStats) {
+    if (data.generation !== this.playbackGeneration) return;
+    this.mdrMidiSchedulingStats = { generation: data.generation, appliedCount: data.appliedCount, lateCount: data.lateCount, maxLateSeconds: data.maxLateSeconds, receivedLateCount: data.receivedLateCount, maxReceiptLateSeconds: data.maxReceiptLateSeconds, lastAppliedAt: data.lastAppliedAt, lastTargetAt: data.lastTargetAt, pendingCount: data.pendingCount };
+    if (data.appliedCount === 0 || data.lastTargetAt === null || data.lastAppliedAt === null || !Number.isFinite(data.lastTargetAt) || !Number.isFinite(data.lastAppliedAt)) return;
+    this.mdrMidiSyncListener?.({ kind: "worklet-dispatch", scheduledSeconds: data.lastTargetAt, dispatchedSeconds: data.lastAppliedAt, hardwareMilliseconds: this.mdrPlayer?.getPlayAtMilliseconds() ?? null });
+  }
+
   private startMdrMidiTimeline(events: readonly ScheduledMdrMidiEvent[], startsAt: number, loopWindow?: MdrMidiLoopWindow) {
     if (!events.length) {
       this.mdrMidiTimelineComplete = true;
@@ -2384,7 +2482,10 @@ export class SignalDeckAudio {
     this.lastMidiSyncUpdateAt = Number.NEGATIVE_INFINITY;
     const pump = () => {
       if (!isCurrentPlaybackGeneration(playbackGeneration, this.playbackGeneration)) return;
-      if (context.currentTime < startsAt) {
+      if (this.mdrMidiTimer !== undefined) window.clearTimeout(this.mdrMidiTimer);
+      this.mdrMidiTimer = undefined;
+      const outputTimeline = !hardwareOutput && this.mdrAudioTimeline?.ready ? this.mdrAudioTimeline : undefined;
+      if (!outputTimeline && context.currentTime < startsAt) {
         this.mdrMidiTimer = window.setTimeout(pump, pumpIntervalMs);
         return;
       }
@@ -2392,10 +2493,12 @@ export class SignalDeckAudio {
       const hardwareMilliseconds = this.mdrPlayer?.getPlayAtMilliseconds() ?? null;
       // Keep the initial buffering offset while OPM/PCM runs. After its shorter
       // ending, advance from that final song position on the live audio clock.
-      const hardwareElapsed = midiClock.read(elapsed, hardwareMilliseconds, this.mdrPlayer?.isTerminated() ?? false);
+      const hardwareElapsed = outputTimeline
+        ? outputTimeline.songSecondsAt(context.currentTime)
+        : midiClock.read(elapsed, hardwareMilliseconds, this.mdrPlayer?.isTerminated() ?? false);
       if (infinite && safeLoopWindow && cursor >= timelineEvents.length && loopStartIndex >= 0) {
         const nextCycleBoundary = safeLoopWindow.endSeconds + cycle * safeLoopPeriod;
-        if (hardwareElapsed + lookaheadSeconds >= nextCycleBoundary) {
+        if ((outputTimeline && !outputTimeline.ended ? outputTimeline.renderedSeconds : hardwareElapsed + lookaheadSeconds) >= nextCycleBoundary) {
           cycle += 1;
           cursor = loopStartIndex;
         }
@@ -2409,20 +2512,22 @@ export class SignalDeckAudio {
         mostRecentDispatchAt = hardwareOutput
           ? resolveExternalMidiDispatchAtSeconds(eventAt, this.externalMidiAdvanceMs, hardwareOutput)
           : resolveSoundFontMdrDispatchAtSeconds(eventAt, this.soundFontMdrDelayMs);
-        if (mostRecentDispatchAt > hardwareElapsed + lookaheadSeconds) {
+        const targetAt = outputTimeline
+          ? outputTimeline.targetAt(mostRecentDispatchAt)
+          : resolveMdrMidiLiveTargetAtSeconds(context.currentTime, hardwareElapsed, mostRecentDispatchAt);
+        if (targetAt === undefined || ((!outputTimeline || outputTimeline.ended) && mostRecentDispatchAt > hardwareElapsed + lookaheadSeconds)) {
           cursor -= 1;
           break;
         }
-        const targetAt = resolveMdrMidiLiveTargetAtSeconds(context.currentTime, hardwareElapsed, mostRecentDispatchAt);
         // Muting a track must not shorten the song's finite timeline.
         this.mdrMidiLastEventAt = Math.max(this.mdrMidiLastEventAt ?? 0, targetAt);
         if (!this.mutedMdrTracks.has(event.sourceTrack) && !shouldSkipMdrMidiEventAtLoopCycle(event.bytes, cycle)) {
           if (hardwareOutput) this.sendMdrMidi(event.bytes, event.sourceTrack, this.externalMidiAdvanceMs, targetAt);
-          else this.queueSoundFontMdrMidi(event.bytes, event.sourceTrack, targetAt, playbackGeneration, shouldScheduleMdrMidiDirectlyAtLoopStart(infinite, cycle, safeLoopWindow ? event.at - safeLoopWindow.startSeconds : event.at, lookaheadSeconds));
+          else this.queueSoundFontMdrMidi(event.bytes, event.sourceTrack, targetAt, playbackGeneration, Boolean(this.gsMidiPort) || shouldScheduleMdrMidiDirectlyAtLoopStart(infinite, cycle, safeLoopWindow ? event.at - safeLoopWindow.startSeconds : event.at, lookaheadSeconds));
         }
         mostRecentEvent = event;
       }
-      if (mostRecentEvent && performance.now() - this.lastMidiSyncUpdateAt >= resolveRealtimeVisualUpdateIntervalMs(this.performanceProfile, this.safariCompatibilityMode)) {
+      if (!this.gsMidiPort && mostRecentEvent && performance.now() - this.lastMidiSyncUpdateAt >= resolveRealtimeVisualUpdateIntervalMs(this.performanceProfile, this.safariCompatibilityMode)) {
         this.lastMidiSyncUpdateAt = performance.now();
         // Events may be queued ahead into the AudioWorklet. Compare the most
         // recently audible event with the actual MXDRV core playhead, rather
@@ -2443,16 +2548,23 @@ export class SignalDeckAudio {
           return;
         }
         this.mdrMidiTimelineComplete = true;
+        this.mdrMidiPump = undefined;
         this.mdrMidiAnimationFrame = undefined;
         return;
       }
       this.mdrMidiTimer = window.setTimeout(pump, pumpIntervalMs);
     };
+    this.mdrMidiPump = pump;
     pump();
   }
 
   stop() {
     this.playbackGeneration += 1;
+    this.resetMdrMidiScheduler();
+    this.mdrMidiVisualQueue.clear();
+    this.mdrMidiMuteVersions.clear();
+    this.mdrAudioTimeline = undefined;
+    this.mdrMidiPump = undefined;
     this.mdrNode?.disconnect();
     this.mdrNode = undefined;
     this.mdrWorklet?.port.postMessage({ type: "stop" });
@@ -2541,9 +2653,9 @@ export class SignalDeckAudio {
     this.setMdrMutedTracks(Array.from(this.mutedMdrTracks));
     this.outputPeakListener?.(0);
     this.resetMdrTrackKeys();
-    // OPM／PCM render in a fixed 48 kHz MXDRV core and are resampled only at the output edge.
-    // Build GS MIDI timestamps from that same core clock; using a 44.1 kHz AudioContext here
-    // would make MIDI tempo diverge from the hardware tracks by the resampling ratio.
+    // OPM／PCM still render at 48 kHz. The offline extractor uses an independent
+    // exact Timer-B clock so rounding a tick to audio samples cannot accumulate
+    // timing error; the resulting seconds map onto the rendered output frames.
     const midiTimeline = await extractMdrMidiEvents(mdr, measuredLoops, resolveMdrMidiTimingSampleRate());
     const songMidiTimeline = measuredLoops === 1 ? midiTimeline : await extractMdrMidiEvents(mdr, 1, resolveMdrMidiTimingSampleRate());
     const midiEvents = midiTimeline.events;
@@ -2588,6 +2700,7 @@ export class SignalDeckAudio {
     let startsAt = fallbackStartsAt;
     let midiTimelineStarted = false;
     let hardwareEndAt: number | undefined;
+    this.mdrAudioTimeline = needsHardwareRenderer && !this.midiOutput ? new MdrAudioTimeline(context.sampleRate) : undefined;
     const startMidiTimeline = (audibleStartAt?: number) => {
       if (midiTimelineStarted) return;
       midiTimelineStarted = true;
@@ -2599,7 +2712,12 @@ export class SignalDeckAudio {
       node.onaudioprocess = (event) => {
         const left = event.outputBuffer.getChannelData(0);
         const right = event.outputBuffer.getChannelData(1);
+        if (!isCurrentPlaybackGeneration(playbackGeneration, this.playbackGeneration)) { left.fill(0); right.fill(0); return; }
         const peak = this.mdrPlayer?.renderInto(left, right) ?? 0;
+        const reportedPlaybackTime = Number((event as AudioProcessingEvent).playbackTime);
+        const blockPlaybackTime = Number.isFinite(reportedPlaybackTime) && reportedPlaybackTime >= 0
+          ? reportedPlaybackTime : context.currentTime + left.length / context.sampleRate;
+        this.mdrAudioTimeline?.recordBlock(blockPlaybackTime, left.length, this.mdrPlayer?.isTerminated() ?? false);
         if (hardwareEndAt === undefined && this.mdrPlayer?.isTerminated()) {
           const playbackTime = Number((event as AudioProcessingEvent).playbackTime);
           const blockStartsAt = Number.isFinite(playbackTime) ? Math.max(context.currentTime, playbackTime) : context.currentTime;
@@ -2614,9 +2732,8 @@ export class SignalDeckAudio {
           this.reportHardwarePlaybackPosition(this.mdrPlayer?.getPlayAtMilliseconds() ?? null);
         }
         if (!midiTimelineStarted) {
-          const playbackTime = Number((event as AudioProcessingEvent).playbackTime);
-          startMidiTimeline(Number.isFinite(playbackTime) ? playbackTime : undefined);
-        }
+          startMidiTimeline(blockPlaybackTime);
+        } else this.mdrMidiPump?.();
       };
       node.connect(gains.opm);
       this.mdrNode = node;
