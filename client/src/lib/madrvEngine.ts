@@ -716,6 +716,8 @@ export type MdrMixerTrack = {
   engine: EngineKind;
   label: string;
   active: boolean;
+  /** MXDRV hardware channel selected by `$E0 $08`, when the track has one. */
+  hardwareChannel?: number;
   /** PCM voice 1–8 when `engine` is `"pcm"` (maps to MXDRV PCM activity bits). */
   pcmVoice?: number;
 };
@@ -1317,6 +1319,16 @@ function resolveMdrPcmVoiceNumber(bytes: Uint8Array, start: number, end: number,
   return Math.max(1, Math.min(8, fromSlot));
 }
 
+/** Hardware channel used by the converted MDX stream; MDR slots may be parked anywhere. */
+function resolveMdrHardwareChannel(bytes: Uint8Array, start: number, end: number, fallbackIndex: number): number {
+  for (let offset = start; offset + 2 < end; offset += 1) {
+    if (bytes[offset] === 0xe0 && bytes[offset + 1] === 0x08 && (bytes[offset + 2] & 0x80) === 0) {
+      return bytes[offset + 2] & 0x0f;
+    }
+  }
+  return fallbackIndex;
+}
+
 /** Inspects the MDR framing implemented by mpxadrv: title, PDX name, tone offset and 32 ordered tracks. */
 export function inspectMdr(input: ArrayBuffer): MdrInfo {
   const bytes = new Uint8Array(input);
@@ -1396,10 +1408,10 @@ export function listMdrMixerTracks(input: ArrayBuffer): MdrMixerTrack[] {
     const minimum = index === 0 ? (extendedPcm ? 5 : 4) : 2;
     const active = end - start > minimum;
     const engine = resolveMdrTrackEngine(bytes, start, end, index);
-    if (engine === "opm") return { index, engine, active, label: `OPM ${index + 1}` };
+    if (engine === "opm") return { index, engine, active, label: `OPM ${index + 1}`, hardwareChannel: resolveMdrHardwareChannel(bytes, start, end, index) };
     if (engine === "pcm") {
       const pcmVoice = resolveMdrPcmVoiceNumber(bytes, start, end, index);
-      return { index, engine, active, label: `PCM ${pcmVoice}`, pcmVoice };
+      return { index, engine, active, label: `PCM ${pcmVoice}`, hardwareChannel: resolveMdrHardwareChannel(bytes, start, end, index), pcmVoice };
     }
     return { index, engine, active, label: "GS" };
   });
@@ -1864,6 +1876,7 @@ export class SignalDeckAudio {
   private mutedMdrTracks = new Set<number>();
   private mdrTrackKeys: MdrTrackKeyState = {};
   private mdrHardwareTrackIndexes: number[] = [];
+  private mdrHardwareTrackRawIndexes = new Map<number, number>();
   private publishedMdrTrackKeys: MdrTrackKeyState = {};
   private trackKeyPublishTimer?: number;
   private lastTrackKeyPublishAt = Number.NEGATIVE_INFINITY;
@@ -1999,8 +2012,9 @@ export class SignalDeckAudio {
     if (!Array.isArray(rawNotes)) return;
     let next: MdrTrackKeyState | undefined;
     for (const track of this.mdrHardwareTrackIndexes) {
-      if (track >= rawNotes.length) continue;
-      const midiNote = mxdrvRawNoteToMidiNote(Number(rawNotes[track]));
+      const rawTrack = this.mdrHardwareTrackRawIndexes.get(track) ?? track;
+      if (rawTrack >= rawNotes.length) continue;
+      const midiNote = mxdrvRawNoteToMidiNote(Number(rawNotes[rawTrack]));
       const current = this.mdrTrackKeys[track];
       if (midiNote === null) {
         if (!current) continue;
@@ -2203,7 +2217,8 @@ export class SignalDeckAudio {
     const snapshot: MdrTrackKeyState = {};
     if (!this.mdrPlayer) return snapshot;
     for (const track of this.mdrHardwareTrackIndexes) {
-      const midiNote = this.mdrPlayer.getHardwareTrackMidiNote(track);
+      const rawTrack = this.mdrHardwareTrackRawIndexes.get(track) ?? track;
+      const midiNote = this.mdrPlayer.getHardwareTrackMidiNote(rawTrack);
       if (midiNote !== null) snapshot[track] = [midiNote];
     }
     return snapshot;
@@ -2282,7 +2297,10 @@ export class SignalDeckAudio {
       if (this.gsMidiPort && track >= 16) delete this.mdrTrackKeys[track];
     }
     this.mutedMdrTracks = muted;
-    const hardwareMask = trackIndexes.filter((index) => index >= 0 && index < 16).reduce((mask, index) => mask | (1 << index), 0);
+    const hardwareMask = trackIndexes
+      .map((index) => this.mdrHardwareTrackRawIndexes.get(index) ?? index)
+      .filter((index) => index >= 0 && index < 16)
+      .reduce((mask, index) => mask | (1 << index), 0);
     // MXDRV returns one mixed OPM/PCM stream. ChannelMask only controls muted
     // tracks; it does not expose separate PCM stems, so a second player would
     // emit the same score again and eventually phase against the first.
@@ -2623,6 +2641,7 @@ export class SignalDeckAudio {
     this.mdrWorklet = undefined;
     this.mdrPlayer?.stop();
     this.mdrHardwareTrackIndexes = [];
+    this.mdrHardwareTrackRawIndexes.clear();
     this.audioCallbackAt.clear();
     this.outputPeakListener?.(0);
     this.resetPcmActivity();
@@ -2682,7 +2701,10 @@ export class SignalDeckAudio {
     throwIfPlaybackSuperseded(playbackGeneration, this.playbackGeneration);
     this.restoreMdrSoundFont();
     const sourceInfo = inspectMdr(mdr);
-    this.mdrHardwareTrackIndexes = listMdrMixerTracks(mdr).filter((track) => track.active && track.engine !== "midi").map((track) => track.index);
+    const mixerTracks = listMdrMixerTracks(mdr);
+    const hardwareTracks = mixerTracks.filter((track) => track.active && track.engine !== "midi");
+    this.mdrHardwareTrackIndexes = hardwareTracks.map((track) => track.index);
+    this.mdrHardwareTrackRawIndexes = new Map(hardwareTracks.map((track) => [track.index, track.hardwareChannel ?? track.index]));
     let needsHardwareRenderer = requiresMdrHardwareRenderer(sourceInfo.hardwareTracks);
     if (sourceInfo.midiTracks > 0 && !this.midiOutput && !this.gsLoaded) throw new Error("このMDRにはGS MIDIトラックがあります。SoundFont bankでSF2/DLSを読み込むか、External MIDIを選択してから再生してください。");
     const measuredLoops = loops <= 0 ? 1 : loops;
@@ -2857,6 +2879,7 @@ export class SignalDeckAudio {
   async playMdx(mdx: ArrayBuffer, pdx: ArrayBuffer | undefined, loops: number, onProgress: (seconds: number) => void, onEnd: () => void): Promise<MdrPlaybackInfo> {
     this.stop();
     this.mdrHardwareTrackIndexes = Array.from({ length: 16 }, (_, index) => index);
+    this.mdrHardwareTrackRawIndexes = new Map(this.mdrHardwareTrackIndexes.map((track) => [track, track]));
     const playbackGeneration = this.playbackGeneration;
     const { context, gains } = this.graph;
     await context.resume();

@@ -112,9 +112,39 @@ describe("Signal Deck diagnostic catalog", () => {
     bytes.set(tracks, title.length + table.length);
     const mixer = listMdrMixerTracks(bytes.buffer);
     expect(mixer.filter((track) => track.active && track.engine === "pcm")).toEqual([
-      expect.objectContaining({ index: 24, label: "PCM 1", active: true, pcmVoice: 1 }),
+      expect.objectContaining({ index: 24, label: "PCM 1", active: true, hardwareChannel: 8, pcmVoice: 1 }),
     ]);
     expect(inspectMdr(bytes.buffer)).toMatchObject({ hardwareTracks: 2, midiTracks: 0 });
+  });
+
+  it("keeps routed OPM channels when MDR slots are parked after MIDI tracks", () => {
+    const title = new TextEncoder().encode("Routed OPM slots\r\n\x1aNONE\0");
+    const table = new Uint8Array(66);
+    const tracks: number[] = [];
+    let offset = 66;
+    for (let index = 0; index < 32; index += 1) {
+      table[2 + index * 2] = offset >> 8;
+      table[3 + index * 2] = offset & 0xff;
+      const track = index === 0
+        ? [0xe0, 0xff, 0x80, 0x03, 0xf1, 0x00]
+        : index === 16
+          ? [0xe0, 0x08, 0x00, 0x80, 0x03, 0xf1, 0x00]
+          : index === 22
+            ? [0xe0, 0x08, 0x06, 0x80, 0x03, 0xf1, 0x00]
+            : [0xf1, 0x00];
+      tracks.push(...track);
+      offset += track.length;
+    }
+    table[0] = offset >> 8;
+    table[1] = offset & 0xff;
+    const bytes = new Uint8Array(title.length + table.length + tracks.length);
+    bytes.set(title, 0);
+    bytes.set(table, title.length);
+    bytes.set(tracks, title.length + table.length);
+    expect(listMdrMixerTracks(bytes.buffer).filter((track) => track.active && track.engine === "opm" && track.index >= 16)).toEqual([
+      expect.objectContaining({ index: 16, label: "OPM 17", hardwareChannel: 0 }),
+      expect.objectContaining({ index: 22, label: "OPM 23", hardwareChannel: 6 }),
+    ]);
   });
 
   it("recognizes MEGALITH PCM buses that live in tracks 24–31", () => {

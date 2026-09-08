@@ -55,7 +55,9 @@ type EngineInternals = {
   mdrMidiLastEventAt: number | null;
   mdrSoundFontQueue: { pendingCount: number; latestTargetAt: number | null };
   mdrHardwareTrackIndexes: number[];
+  mdrHardwareTrackRawIndexes: Map<number, number>;
   mdrHardwareVisualQueue: { pendingCount: number; latestTargetAt: number | null };
+  reportHardwareTrackKeysFromRaw(rawNotes: unknown): void;
   renderMdrOutputBlock(left: Float32Array, right: Float32Array, blockPlaybackTime: number): number;
   startMdrMidiTimeline(events: readonly ScheduledMdrMidiEvent[], startsAt: number, loopWindow?: { startSeconds: number; endSeconds: number }): void;
   hasMdrMidiTailElapsed(): boolean;
@@ -272,6 +274,32 @@ describe("hybrid MIDI draining", () => {
 });
 
 describe("finite MDR transport completion", () => {
+  it("maps routed MDR hardware mutes to MXDRV channels", () => {
+    const h = createHarness();
+    h.internal.mdrHardwareTrackIndexes = [16];
+    h.internal.mdrHardwareTrackRawIndexes = new Map([[16, 0]]);
+
+    h.engine.setMdrMutedTracks([16]);
+
+    expect(h.player.setChannelMask).toHaveBeenCalledWith(1);
+  });
+
+  it("reports OPM notes under their MDR track after routed channel remapping", () => {
+    const h = createHarness();
+    h.internal.mdrHardwareTrackIndexes = [16];
+    h.internal.mdrHardwareTrackRawIndexes = new Map([[16, 0]]);
+    const keys = vi.fn();
+    h.engine.setMdrTrackKeyListener(keys);
+    keys.mockClear();
+
+    h.internal.reportHardwareTrackKeysFromRaw([57 * 64]);
+    h.advance(34);
+    expect(keys).toHaveBeenLastCalledWith({ 16: [60] });
+    h.internal.reportHardwareTrackKeysFromRaw([-1]);
+    h.advance(34);
+    expect(keys).toHaveBeenLastCalledWith({});
+  });
+
   it("publishes OPM key transitions inside a large output block", () => {
     const h = createHarness();
     h.internal.mdrHardwareTrackIndexes = [0];
