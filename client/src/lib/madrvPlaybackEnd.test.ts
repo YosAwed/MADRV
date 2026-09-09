@@ -274,6 +274,28 @@ describe("hybrid MIDI draining", () => {
 });
 
 describe("finite MDR transport completion", () => {
+  it.each([1, 2, 4, 0])("reports one-pass progress independently of loop count %s without changing playback limits", async loops => {
+    const h = createHarness();
+    h.hardware.duration = 4;
+    midiFixture.loopWindow = { startSeconds: 4, endSeconds: 8 };
+    midiFixture.events = [{ at: 8, sourceTrack: 16, bytes: [0x80, 60, 0] }];
+    const onProgress = vi.fn();
+    const onEnd = vi.fn();
+    const info = await h.engine.playMdr(makeMdr(), undefined, loops, onProgress, onEnd);
+    expect(info.duration).toBe(4);
+    expect(h.player.start).toHaveBeenCalledWith(loops);
+    h.process(0);
+    for (const [at, expected] of [[3900, 3.9], [4100, 0.1], [7900, 3.9], [8100, 0.1], [12100, 0.1]]) {
+      h.hardware.milliseconds = at;
+      h.advance(220);
+      const [elapsed, duration] = onProgress.mock.calls.at(-1)!;
+      expect(elapsed).toBeCloseTo((loops === 1 || loops === 2) && at >= 8000 ? 4 : expected);
+      expect(duration).toBe(4);
+    }
+    expect(onEnd).not.toHaveBeenCalled();
+    h.engine.stop();
+  });
+
   it("maps routed MDR hardware mutes to MXDRV channels", () => {
     const h = createHarness();
     h.internal.mdrHardwareTrackIndexes = [16];

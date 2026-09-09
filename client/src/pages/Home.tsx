@@ -118,6 +118,11 @@ function formatTime(value: number) {
   return `${minutes}:${seconds}.${milliseconds}`;
 }
 
+function formatPlaybackTime(value: number) {
+  const seconds = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 function formatByteSize(value: number) {
   if (value < 1024 * 1024) return `${Math.max(0, Math.round(value / 1024))} KB`;
   return `${(value / 1024 / 1024).toFixed(value < 10 * 1024 * 1024 ? 1 : 0)} MB`;
@@ -260,7 +265,9 @@ const TrackFullKeyboard = memo(function TrackFullKeyboard({ label, midiNotes, mu
 });
 
 type KeyboardMatrixMode = "tracks" | "engines";
+type KeyboardEngineFilter = "all" | MdrMixerTrack["engine"];
 const KEYBOARD_MATRIX_MODE_KEY = "madrv-player.keyboard-matrix-mode-v1";
+const KEYBOARD_ENGINE_FILTER_KEY = "madrv-player.keyboard-engine-filter-v1";
 const PLAYBACK_TUNING_STORAGE_KEY = "madrv-player.playback-tuning-preset-v1";
 
 type PlaybackTuningSelection = "auto" | PlaybackTuningPreset;
@@ -269,10 +276,11 @@ function parsePlaybackTuningPreset(value: string | null): PlaybackTuningSelectio
   if (value === "auto" || value === "standard" || value === "low-latency" || value === "stable") return value;
   return "auto";
 }
-/** Track matrix keyboards: pitched buses only (PCM has no meaningful keyboard). */
-const ENGINE_BUS_ORDER = ["opm", "midi"] as const;
+/** Pitched buses use keyboards; PCM uses activity pads. */
+const ENGINE_BUS_ORDER = ["opm", "pcm", "midi"] as const;
 const ENGINE_BUS_META: Record<(typeof ENGINE_BUS_ORDER)[number], { label: string; tone: string; note: string }> = {
   opm: { label: "OPM", tone: "text-primary", note: "YM2151 buses merged" },
+  pcm: { label: "PCM", tone: "text-[#b9c9b1]", note: "PCM pad activity" },
   midi: { label: "MIDI", tone: "text-[#a8c5ec]", note: "GS MIDI buses merged" },
 };
 
@@ -350,6 +358,7 @@ export default function Home() {
   const [isPreparingPlayback, setIsPreparingPlayback] = useState(false);
   const [loadingSource, setLoadingSource] = useState<{ requestId: number; title: string; entryId?: string } | null>(null);
   const [playingPlaylistEntryId, setPlayingPlaylistEntryId] = useState<string | null>(null);
+  const [playingPlaylistLoopCount, setPlayingPlaylistLoopCount] = useState(DEFAULT_PLAYLIST_LOOP_COUNT);
   const [fadeDuringLoad, setFadeDuringLoad] = useState(() => {
     try { return window.localStorage.getItem("madrv-player.fade-during-load-v1") === "true"; } catch { return false; }
   });
@@ -394,6 +403,8 @@ export default function Home() {
       return [];
     }
   });
+  const playlistEntriesRef = useRef(playlistEntries);
+  playlistEntriesRef.current = playlistEntries;
   const [playlistIndex, setPlaylistIndex] = useState<number | null>(null);
   const [playlistDragIndex, setPlaylistDragIndex] = useState<number | null>(null);
   const [favoriteEntries, setFavoriteEntries] = useState<RemoteCatalogEntry[]>([]);
@@ -426,6 +437,13 @@ export default function Home() {
   const [midiDiagnostics, setMidiDiagnostics] = useState<MidiDiagnosticEntry[]>([]);
   const [mixerTracks, setMixerTracks] = useState<MdrMixerTrack[]>([]);
   const activeMixerTracks = useMemo(() => mixerTracks.filter((track) => track.active), [mixerTracks]);
+  const [keyboardEngineFilter, setKeyboardEngineFilter] = useState<KeyboardEngineFilter>(() => {
+    try {
+      const stored = window.localStorage.getItem(KEYBOARD_ENGINE_FILTER_KEY);
+      return stored === "opm" || stored === "pcm" || stored === "midi" ? stored : "all";
+    } catch { return "all"; }
+  });
+  const visibleMixerTracks = useMemo(() => activeMixerTracks.filter(track => keyboardEngineFilter === "all" || track.engine === keyboardEngineFilter), [activeMixerTracks, keyboardEngineFilter]);
   const mixerTracksByEngine = useMemo(() => ({
     opm: activeMixerTracks.filter((track) => track.engine === "opm"),
     pcm: activeMixerTracks.filter((track) => track.engine === "pcm"),
@@ -563,6 +581,10 @@ export default function Home() {
   useEffect(() => {
     try { window.localStorage.setItem(KEYBOARD_MATRIX_MODE_KEY, keyboardMatrixMode); } catch { /* Browser storage may be unavailable. */ }
   }, [keyboardMatrixMode]);
+
+  useEffect(() => {
+    try { window.localStorage.setItem(KEYBOARD_ENGINE_FILTER_KEY, keyboardEngineFilter); } catch { /* Filtering works without browser storage. */ }
+  }, [keyboardEngineFilter]);
 
   useEffect(() => {
     try {
@@ -1490,8 +1512,8 @@ export default function Home() {
   }
 
   async function playPlaylistEntry(entryId: string) {
-    const index = playlistEntries.findIndex((candidate) => candidate.id === entryId);
-    const entry = index >= 0 ? playlistEntries[index] : undefined;
+    const index = playlistEntriesRef.current.findIndex((candidate) => candidate.id === entryId);
+    const entry = index >= 0 ? playlistEntriesRef.current[index] : undefined;
     if (!entry) {
       setNotice("選択したプレイリスト項目が見つかりません。");
       return;
@@ -1533,9 +1555,9 @@ export default function Home() {
         setPlaylistIndex(index);
         setNotice(`ローカル曲「${entry.title}」は、このセッションで読み込んだ本体がある間だけ再生可能です。ページ再読込後はリモート曲のみ保存され、ローカル曲はフォルダ／ファイルから再度 Add current してください。`);
         if (playlistRunRef.current) {
-          const nextIndex = resolveNextPlaylistIndex(index, playlistEntries.length);
+          const nextIndex = resolveNextPlaylistIndex(index, playlistEntriesRef.current.length);
           if (nextIndex !== null) {
-            void playPlaylistEntry(playlistEntries[nextIndex]!.id);
+            void playPlaylistEntry(playlistEntriesRef.current[nextIndex]!.id);
             return;
           }
           playlistRunRef.current = false;
@@ -1559,26 +1581,36 @@ export default function Home() {
       audio().setLevel("opm", opmLevel);
       audio().setLevel("pcm", pcmLevel);
       audio().setLevel("midi", midiLevel);
-      const entryLoopCount = normalizePlaylistLoopCount(entry.loopCount ?? DEFAULT_PLAYLIST_LOOP_COUNT);
+      // A download or the previous song may have started before the user edited this entry.
+      const latestEntry = playlistEntriesRef.current.find(candidate => candidate.id === entryId);
+      if (!latestEntry) return;
+      const entryLoopCount = normalizePlaylistLoopCount(latestEntry.loopCount ?? DEFAULT_PLAYLIST_LOOP_COUNT);
+      setPlayingPlaylistLoopCount(entryLoopCount);
       let singleLoopDuration = 0;
       const onEnd = () => {
         if (requestId !== playlistStartRequestRef.current) return;
         if (!playlistRunRef.current) return;
-        const nextIndex = resolveNextPlaylistIndex(index, playlistEntries.length);
+        const nextIndex = resolveNextPlaylistIndex(index, playlistEntriesRef.current.length);
         if (nextIndex !== null) {
           const silenceSeconds = resolvePlaylistInterTrackSilenceSeconds(singleLoopDuration, entryLoopCount);
           const playNext = () => {
             if (requestId !== playlistStartRequestRef.current || !playlistRunRef.current) return;
-            void playPlaylistEntry(playlistEntries[nextIndex]!.id);
+            const nextEntry = playlistEntriesRef.current[nextIndex];
+            if (nextEntry) void playPlaylistEntry(nextEntry.id);
+            else {
+              playlistRunRef.current = false;
+              setIsPlaying(false);
+              setPlayingPlaylistEntryId(null);
+            }
           };
           void revertSessionSoundFontIfNeeded().then(() => {
             if (requestId !== playlistStartRequestRef.current || !playlistRunRef.current) return;
             if (silenceSeconds > 0) {
               setIsPlaying(false);
-              setNotice(`「${source.title}」を${entryLoopCount}回再生しました。短い曲のため${silenceSeconds.toFixed(1)}秒の無音後に次の曲へ進みます（${nextIndex + 1} / ${playlistEntries.length}）。`);
+              setNotice(`「${source.title}」を${entryLoopCount}回再生しました。短い曲のため${silenceSeconds.toFixed(1)}秒の無音後に次の曲へ進みます（${nextIndex + 1} / ${playlistEntriesRef.current.length}）。`);
               window.setTimeout(playNext, silenceSeconds * 1000);
             } else {
-              setNotice(`「${source.title}」を${entryLoopCount}回再生しました。次の曲へ進みます（${nextIndex + 1} / ${playlistEntries.length}）。`);
+              setNotice(`「${source.title}」を${entryLoopCount}回再生しました。次の曲へ進みます（${nextIndex + 1} / ${playlistEntriesRef.current.length}）。`);
               playNext();
             }
           });
@@ -1587,13 +1619,13 @@ export default function Home() {
         playlistRunRef.current = false;
         setIsPlaying(false);
         setPlayingPlaylistEntryId(null);
-        setNotice(`プレイリスト最終曲「${source.title}」を${normalizePlaylistLoopCount(entry.loopCount ?? DEFAULT_PLAYLIST_LOOP_COUNT)}回再生しました。再生を停止しました。`);
+        setNotice(`プレイリスト最終曲「${source.title}」を${entryLoopCount}回再生しました。再生を停止しました。`);
       };
       preparingRequestRef.current = requestId;
       setIsPreparingPlayback(true);
       setIsPlaying(false);
       setPlayingPlaylistEntryId(null);
-      const onProgress = (seconds: number) => { if (requestId === playlistStartRequestRef.current) setElapsed(seconds); };
+      const onProgress = (seconds: number, displayDuration?: number) => { if (requestId === playlistStartRequestRef.current) { setElapsed(seconds); if (displayDuration !== undefined) setDuration(displayDuration); } };
       const rendered = source.format === "mdx"
         ? await audio().playMdx(source.source, source.pdx, entryLoopCount, onProgress, onEnd)
         : await audio().playMdr(source.source, source.pdx, entryLoopCount, onProgress, onEnd);
@@ -1603,19 +1635,21 @@ export default function Home() {
       refreshAudioClock();
       setIsPlaying(true);
       setPlayingPlaylistEntryId(entry.id);
-      setNotice(`プレイリスト ${index + 1} / ${playlistEntries.length}「${source.title}」を${entryLoopCount}回ループで再生中です。`);
+      setNotice(`プレイリスト ${index + 1} / ${playlistEntriesRef.current.length}「${source.title}」を${entryLoopCount}回ループで再生中です。`);
     } catch (error) {
       if (requestId !== playlistStartRequestRef.current) return;
       audio().stop();
       setIsPlaying(false);
       setPlayingPlaylistEntryId(null);
       const message = error instanceof Error ? error.message : "プレイリストの曲を再生できませんでした。";
-      const nextIndex = resolveNextPlaylistIndex(index, playlistEntries.length);
+      const nextIndex = resolveNextPlaylistIndex(index, playlistEntriesRef.current.length);
       if (playlistRunRef.current && nextIndex !== null) {
-        setNotice(`${message} 次の曲へ進みます（${nextIndex + 1} / ${playlistEntries.length}）。`);
+        setNotice(`${message} 次の曲へ進みます（${nextIndex + 1} / ${playlistEntriesRef.current.length}）。`);
         void revertSessionSoundFontIfNeeded().then(() => {
           if (requestId !== playlistStartRequestRef.current || !playlistRunRef.current) return;
-          void playPlaylistEntry(playlistEntries[nextIndex]!.id);
+          const nextEntry = playlistEntriesRef.current[nextIndex];
+          if (nextEntry) void playPlaylistEntry(nextEntry.id);
+          else playlistRunRef.current = false;
         });
         return;
       }
@@ -1641,7 +1675,7 @@ export default function Home() {
     }
     const requestId = beginSourceTransition(sourceTitle);
     const isCurrent = () => requestId === playlistStartRequestRef.current;
-    const onProgress = (seconds: number) => { if (isCurrent()) setElapsed(seconds); };
+    const onProgress = (seconds: number, displayDuration?: number) => { if (isCurrent()) { setElapsed(seconds); if (displayDuration !== undefined) setDuration(displayDuration); } };
     preparingRequestRef.current = requestId;
     setIsPreparingPlayback(true);
     setNotice(mode === "mml" ? "MML再生を準備しています…" : "MDR／MDX再生を準備しています。初回はWebAssembly音源の読込に少し時間がかかることがあります。もう一度押すと中止します。");
@@ -1833,71 +1867,109 @@ export default function Home() {
           <div className="flex items-center justify-between gap-2">
             <span className="mono program-deck-label">Program Deck</span>
             <span data-testid="playback-state" role="status" className="mono inline-flex items-center gap-1.5 text-[11px] text-primary">{playbackLoading && <LoaderCircle size={12} className="animate-spin" />}{playbackLoading ? "LOADING" : isPlaying ? "PLAYING" : "READY"}</span>
-          </div><div className="compact-title-row"><h1 data-testid="source-title" title={loadingSource?.title ?? sourceTitle}>{loadingSource?.title ?? sourceTitle}</h1><span className="mono compact-clock">{formatTime(elapsed)} / {duration ? formatTime(duration) : "--:--.---"}</span><span className="mono compact-tempo">{estimatedBpm ? `${estimatedBpm.toFixed(1)} BPM` : "— BPM"}</span></div>
+          </div>
+          <div className="compact-title-row"><h1 data-testid="source-title" title={loadingSource?.title ?? sourceTitle}>{loadingSource?.title ?? sourceTitle}</h1></div>
+          <div className="deck-playback-meta mono" data-testid="playback-meta">
+            <div className="deck-time-row">
+            <span className="deck-inline-position" data-testid="playback-time-position">
+              <span className="compact-clock" data-testid="playback-elapsed" aria-label="経過時間">{formatPlaybackTime(elapsed)} / {duration ? formatPlaybackTime(duration) : "--:--"}</span>
+              <span className="deck-position-track" role="progressbar" aria-label="再生位置" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(transportProgress)} aria-valuetext={`${formatPlaybackTime(elapsed)} / ${duration ? formatPlaybackTime(duration) : "--:--"}（表示のみ）`} title="再生位置の表示です。ドラッグでの移動には対応していません。">
+                <span className="deck-position-fill" style={{ width: `${transportProgress}%` }} />
+                <span className="deck-position-marker" data-testid="playback-marker" style={{ left: `${transportProgress}%`, transition: isMobile ? "left 200ms linear" : undefined }} />
+              </span>
+              <span className="deck-position-percent">(<span data-testid="playback-position">{Math.round(transportProgress)}%</span>)</span>
+            </span>
+            <span className="compact-tempo" data-testid="playback-bpm">{estimatedBpm ? `${estimatedBpm.toFixed(1)} BPM` : "— BPM"}</span>
+            </div>
+            <div className="deck-playlist-row">
+            <span className="deck-playlist-number" data-testid="playback-playlist-number"><span className="deck-meta-label">Playlist no.</span> {playlistIndex !== null && playlistEntries[playlistIndex] ? `${playlistIndex + 1} / ${playlistEntries.length}` : "—"}</span>
+          {playlistRunRef.current && playlistIndex !== null && playlistIndex >= 0 && <span data-testid="playlist-up-next" className="deck-up-next mono"><span>Next</span>{nextPlaylistEntry ? <span className="deck-next-title" title={nextPlaylistEntry.title}>{nextPlaylistEntry.title}</span> : <span className="deck-next-title">最後の曲です · 再生後に停止</span>}</span>}
+            </div>
+          </div>
           <div data-testid="primary-transport-controls" className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 border-b border-white/10 pb-3 sm:gap-3 sm:pb-4">
-                  <div className="flex items-center gap-2">
+                  <div className="deck-transport-actions flex items-center gap-2">
                     <Button onClick={togglePlayback} size="icon" className="h-11 w-11 rounded-none bg-primary text-primary-foreground shadow-[3px_3px_0_0_rgba(216,255,62,0.16)] transition-transform active:scale-95 hover:bg-[#e5ff76] sm:h-12 sm:w-12" aria-label={playbackLoading ? "読み込みを中止" : isPlaying ? "停止" : "再生"}>{playbackLoading ? <LoaderCircle size={20} className="animate-spin" /> : isPlaying ? <CircleStop size={20} /> : <Play size={20} fill="currentColor" />}</Button>
                     <Button onClick={stopPlayback} variant="outline" className="h-11 rounded-none border-white/20 px-3 text-[#f5f4ec] hover:border-primary hover:bg-primary/5 hover:text-primary sm:h-12 sm:px-4"><CircleStop size={16} />停止</Button>
+            <div role="group" aria-label="再生ボタン横の曲送り" className="flex shrink-0 gap-1.5">
+              <button type="button" aria-label="Prev：前の曲を再生" onClick={() => playAdjacentPlaylistEntry(-1)} disabled={!playlistEntries.length || playlistIndex === null} className="mono min-h-8 border border-white/25 px-3 text-[10px] uppercase tracking-[0.07em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">Prev</button>
+              <button type="button" aria-label="Next：次の曲を再生" onClick={() => playAdjacentPlaylistEntry(1)} disabled={!playlistEntries.length || playlistIndex === null} className="mono min-h-8 border border-white/25 px-3 text-[10px] uppercase tracking-[0.07em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">Next</button>
+            </div>
                     <Button onClick={() => setMml(defaultMml)} variant="ghost" className="h-11 rounded-none px-2 text-[#a9aca2] hover:text-primary sm:h-12 sm:px-3" aria-label="MMLを初期状態に戻す"><RotateCcw size={16} /></Button>
                   </div>
                   <div className="flex min-w-0 items-center gap-1 sm:ml-auto sm:w-full sm:max-w-[420px] sm:gap-3"><Volume2 size={15} className="shrink-0 text-primary sm:h-[17px] sm:w-[17px]" /><input type="range" min="0" max="100" value={volume} onChange={(event) => { const value = Number(event.target.value); setVolume(value); volumeRef.current = value; audio().setMaster(value); }} className="range-control min-w-0" aria-label="マスター音量" /><span className="mono w-6 shrink-0 text-right text-[10px] text-[#dfe1d8] sm:w-8 sm:text-[11px]">{volume}</span></div><div className="compact-loop mono"><label htmlFor="playback-loop-count">Loop</label><input id="playback-loop-count" type="number" min="1" max="99" disabled={loopCount === 0} value={loopCount === 0 ? "" : loopCount} placeholder="∞" onChange={(event) => setLoopCount(Math.max(1, Math.min(99, Number(event.target.value) || 1)))} aria-label="ループ回数" /><button type="button" aria-label="無限ループを切り替える" aria-pressed={loopCount === 0} onClick={() => setLoopCount(current => current === 0 ? 1 : 0)}>∞</button></div></div>
           <div className="deck-levels" role="group" aria-label="出力レベル"><span className="mono program-deck-label">出力レベル</span>
               <div className="compact-levels">{engineRows.map(engine => { const [level, setLevel] = activeLevels[engine.id]; return <label key={engine.id} className="compact-level"><span className="mono">{engine.label}</span><EngineStatus active={isEngineActive(engine.id)} /><input type="range" min="0" max="100" value={level} onChange={event => { const value = Number(event.target.value); if (engine.id === "opm") { setOpmLevel(value); setPcmLevel(value); audio().setLevel("opm", value); audio().setLevel("pcm", value); } else { setLevel(value); audio().setLevel("midi", value); } }} className="range-control" aria-label={`${engine.label}の出力レベル`} /><span className="mono">{level}%</span></label>; })}</div>
 </div>
-          <div className="signal-window calibrated-rules relative h-[52px] overflow-hidden border-y border-white/10 bg-[#11120f]" role="progressbar" aria-label="再生位置" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(transportProgress)}>
-                  <div className="absolute inset-0 opacity-50" style={{ backgroundImage: "repeating-linear-gradient(90deg, rgba(245,244,236,.14) 0 1px, transparent 1px 40px)" }} />
-                  <div className="absolute inset-x-3 bottom-3 h-[2px] bg-white/15"><div className="h-full bg-primary/60" style={{ width: `${transportProgress}%`, transition: isMobile ? "width 200ms linear" : undefined }} /></div>
-                  <div className="absolute inset-x-3 top-2 flex items-center justify-between"><span className="mono text-[9px] uppercase tracking-[0.16em] text-[#a9aca2]">Playback position</span><span data-testid="playback-position" className="mono text-[10px] text-primary">{transportProgress.toFixed(1)}%</span></div>
-                  <div className="absolute inset-x-3 inset-y-0 will-change-transform" data-testid="playback-marker" style={{ transform: `translate3d(${transportProgress}%, 0, 0)`, transition: isMobile ? "transform 200ms linear" : undefined }}><div className="absolute -left-[4px] bottom-[7px] h-2.5 w-2.5 rotate-45 border border-primary bg-[#11120f] shadow-[0_0_12px_2px_rgba(216,255,62,.16)]" /></div>
-                </div>
           <div className="flex flex-wrap items-center gap-2 border-l-2 border-primary/60 bg-primary/[0.045] pr-2">
             <p data-testid="playback-notice" role="status" className="mono m-0 min-w-0 flex-[1_1_240px] px-3 py-2 text-[10px] leading-5 text-[#dfe1d8]">{loadingSource ? `LOADING — 「${loadingSource.title}」を読み込んでいます。停止で中止できます。` : notice}</p>
-            <div role="group" aria-label="再生状況の曲送り" className="flex shrink-0 gap-1.5 py-1 pl-2">
-              <button type="button" aria-label="Prev：前の曲を再生" onClick={() => playAdjacentPlaylistEntry(-1)} disabled={!playlistEntries.length || playlistIndex === null} className="mono min-h-8 border border-white/25 px-3 text-[10px] uppercase tracking-[0.07em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">Prev</button>
-              <button type="button" aria-label="Next：次の曲を再生" onClick={() => playAdjacentPlaylistEntry(1)} disabled={!playlistEntries.length || playlistIndex === null} className="mono min-h-8 border border-white/25 px-3 text-[10px] uppercase tracking-[0.07em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">Next</button>
-            </div>
+
           </div>
-          {playlistRunRef.current && playlistIndex !== null && playlistIndex >= 0 && <p data-testid="playlist-up-next" className="deck-up-next mono"><span>Next</span>{nextPlaylistEntry ? <><span className="deck-next-position">{nextPlaylistIndex! + 1} / {playlistEntries.length}</span><span className="deck-next-title" title={nextPlaylistEntry.title}>{nextPlaylistEntry.title}</span></> : <span className="deck-next-title">最後の曲です · 再生後に停止</span>}</p>}
+
         </section>
-          <CompactPanel id="matrix" defaultOpen title="鍵盤 / Track matrix" summary={`${activeMixerTracks.length} tracks · ${mutedTracks.length} muted`}><div className="compact-matrix"><span className="sr-only">トラックごとにミュートとソロを切り替えられます。</span><div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2">
+          <div className="deck-library-layout">
+            <div className={`deck-library-grid${playlistEntries.length ? " has-playlist" : ""}`} data-testid="deck-library" data-has-playlist={playlistEntries.length > 0}>
+          <CompactPanel id="playlist" defaultOpen title="プレイリスト" summary={`${playlistEntries.length} 曲`}><div className="compact-playlist" aria-label="プレイリスト" data-testid="saved-playlist">
+                      <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><ListMusic size={15} className="text-primary" /><div><SmallLabel help={<>曲別のループ回数で連続再生し、10秒以下の曲は開始から11秒になるまで無音を入れます。最後の曲で停止します。ローカル曲は同一セッション内のみ（再読込後はリモート曲だけ保存）。<br /><br />ローカルまたはリモートの音源を読み込んで、Add currentでプレイリストへ登録できます。リモートカタログやフォルダ選択で読み込んだ曲も追加されます。</>}>Saved playlist</SmallLabel></div></div><div className="flex flex-wrap gap-1.5"><button onClick={addCurrentSourceToPlaylist} disabled={mode === "mml"} className="mono border border-white/25 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">Add current</button>{!playlistEntries.length && <button type="button" onClick={() => changeSettingsOpen(true)} className="mono settings-toggle"><FolderOpen size={15} />音源・カタログを開く</button>}{playlistEntries.length > 0 && <><button onClick={() => playAdjacentPlaylistEntry(-1)} disabled={!playlistEntries.length || playlistIndex === null} className="mono border border-white/20 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-35">Prev</button><button onClick={() => playAdjacentPlaylistEntry(1)} disabled={!playlistEntries.length || playlistIndex === null} className="mono border border-white/20 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-35">Next</button><button onClick={clearPlaylist} disabled={!playlistEntries.length} className="mono border border-[#ff9b94]/35 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#ffb8b2] transition-colors hover:bg-[#ff9b94]/10 disabled:opacity-35">Clear</button><button onClick={() => { const selectedEntry = playlistIndex === null ? undefined : playlistEntries[playlistIndex]; if (selectedEntry) { playlistRunRef.current = true; void playPlaylistEntry(selectedEntry.id); } }} disabled={playlistIndex === null || isPlaying || playbackLoading} className="mono border border-primary/55 px-3 py-2 text-[9px] uppercase tracking-[0.08em] text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:opacity-35">Play selected</button></>}</div></div>
+
+                    {playlistEntries.length > 0 && <div data-testid="playlist-entry-list" className="playlist-entry-list mt-3 overflow-y-auto border border-white/10 bg-[#11120f]">
+                      {playlistEntries.map((entry, index) => { const pdxMissing = entry.format === "mdx" && Boolean(entry.requiredPdxName) && !entry.pdx; const selected = index === playlistIndex; const loading = loadingSource?.entryId === entry.id; const playing = playingPlaylistEntryId === entry.id && isPlaying; const entryLoops = normalizePlaylistLoopCount(entry.loopCount ?? DEFAULT_PLAYLIST_LOOP_COUNT); const pendingLoops = playing && entryLoops !== playingPlaylistLoopCount; return <div key={entry.id} draggable onDragStart={(event) => { setPlaylistDragIndex(index); event.dataTransfer.effectAllowed = "move"; }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (playlistDragIndex !== null) moveEntryInPlaylist(playlistDragIndex, index); setPlaylistDragIndex(null); }} onDragEnd={() => setPlaylistDragIndex(null)} className={`compact-playlist-entry grid grid-cols-[auto_1fr_auto] gap-2 border-b border-white/5 px-3 py-2 last:border-b-0 ${selected ? "bg-primary/[0.08]" : "hover:bg-white/[0.035]"}`}><span className={`mono cursor-grab pt-1 text-[9px] ${selected ? "text-primary" : "text-[#8b9085]"}`}>{String(index + 1).padStart(2, "0")}</span><button type="button" data-testid={`playlist-entry-${index}`} data-playlist-entry-id={entry.id} onClick={() => { playlistRunRef.current = true; void playPlaylistEntry(entry.id); }} className="min-w-0 text-left"><span data-testid={`playlist-entry-title-${index}`} title={entry.title} className="mono block truncate text-[10px] text-[#f5f4ec]">{entry.title}</span><span data-testid={`playlist-entry-path-${index}`} className="mono block truncate pt-0.5 text-[8px] text-[#8b9085]">{entry.origin.toUpperCase()} · {entry.format.toUpperCase()} · {entry.path ?? "remote URL"}</span></button><div className="flex flex-wrap items-center gap-1"><label className="mono flex items-center gap-1 text-[8px] text-[#a9aca2]">×<input aria-label={`${entry.title}のループ回数`} type="number" min={1} max={99} value={entryLoops} title={playing ? "再生中の変更は次回から適用されます。すぐ適用するには「適用して最初から再生」を押してください。" : undefined} onChange={(event) => updatePlaylistEntryLoops(entry.id, Number(event.target.value))} className="mono w-9 border border-white/15 bg-black/20 px-1 py-1 text-center text-[9px] text-[#f5f4ec] outline-none focus:border-primary" /></label><button type="button" aria-label={`${entry.title}を上へ移動`} disabled={index === 0} onClick={() => moveEntryInPlaylist(index, index - 1)} className="mono border border-white/15 px-1.5 py-1 text-[8px] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-25">↑</button><button type="button" aria-label={`${entry.title}を下へ移動`} disabled={index === playlistEntries.length - 1} onClick={() => moveEntryInPlaylist(index, index + 1)} className="mono border border-white/15 px-1.5 py-1 text-[8px] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-25">↓</button><button type="button" aria-label={`${entry.title}をプレイリストから削除`} onClick={() => removeEntryFromPlaylist(entry.id)} className="mono border border-[#ff9b94]/35 px-1.5 py-1 text-[8px] text-[#ffb8b2] hover:bg-[#ff9b94]/10">×</button><span data-testid={`playlist-entry-state-${index}`} className={`mono inline-flex items-center gap-1 self-center text-[8px] uppercase tracking-[0.08em] ${loading || playing ? "text-primary" : pdxMissing ? "text-[#ff9b94]" : "text-[#a9aca2]"}`}>{loading && <LoaderCircle size={10} className="shrink-0 animate-spin" />}{loading ? "LOADING" : pdxMissing ? "PDX missing" : playing ? "playing" : "ready"}</span></div>{pendingLoops && <div data-testid={`playlist-loop-change-${index}`} className="col-span-full flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-primary/20 pt-1 text-[10px] text-[#dfe1d8]"><span>現在{playingPlaylistLoopCount}回・次回{entryLoops}回</span><button type="button" onClick={() => { playlistRunRef.current = true; void playPlaylistEntry(entry.id); }} className="border border-primary/45 px-2 py-1 text-primary hover:bg-primary/10">適用して最初から再生</button></div>}</div>; })}
+                    </div>}
+
+                    {playlistEntries.length > 0 && <div className="mt-2 flex items-start gap-1 border-t border-white/10 pt-2">
+                      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-[11px] leading-5 text-[#dfe1d8]">
+                        <input type="checkbox" checked={fadeDuringLoad} onChange={event => changeFadeDuringLoad(event.target.checked)} className="shrink-0 accent-primary" />
+                        読込中にフェードアウト
+                      </label>
+                      <HelpTooltip label="読込中のフェードアウト">ONにすると、次の曲の読み込み中に前の曲を約0.6秒でフェードアウトします。OFFでは切り替わるまで前の曲を流し続けます。OPM／PCM／内蔵SoundFontが対象で、外部MIDI機器の音量は変わりません。設定はこのブラウザに保存されます。</HelpTooltip>
+                    </div>}
+                  </div></CompactPanel>
+          <CompactPanel id="matrix" defaultOpen title="鍵盤 / Track matrix" summary={`${visibleMixerTracks.length} / ${activeMixerTracks.length} tracks · ${mutedTracks.length} muted`}><div className="compact-matrix"><span className="sr-only">トラックごとにミュートとソロを切り替えられます。</span><div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1"><SmallLabel help={<>C0–B7 · OPM / MIDI · PCM mute</>}>Track matrix / MDR & MDX mixer</SmallLabel></div>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex border border-white/20" role="group" aria-label="鍵盤マトリックス表示モード">
-                    <button type="button" aria-pressed={keyboardMatrixMode === "tracks"} onClick={() => setKeyboardMatrixMode("tracks")} className={`mono px-2.5 py-1 text-[8px] uppercase tracking-[0.08em] ${keyboardMatrixMode === "tracks" ? "bg-primary text-primary-foreground" : "text-[#a9aca2] hover:text-primary"}`}>All tracks</button>
-                    <button type="button" aria-pressed={keyboardMatrixMode === "engines"} onClick={() => setKeyboardMatrixMode("engines")} className={`mono border-l border-white/20 px-2.5 py-1 text-[8px] uppercase tracking-[0.08em] ${keyboardMatrixMode === "engines" ? "bg-primary text-primary-foreground" : "text-[#a9aca2] hover:text-primary"}`}>OPM / MIDI</button>
+                    <button type="button" aria-pressed={keyboardMatrixMode === "tracks"} onClick={() => setKeyboardMatrixMode("tracks")} className={`mono px-2.5 py-1 text-[8px] uppercase tracking-[0.08em] ${keyboardMatrixMode === "tracks" ? "bg-primary text-primary-foreground" : "text-[#a9aca2] hover:text-primary"}`}>トラック別</button>
+                    <button type="button" aria-pressed={keyboardMatrixMode === "engines"} onClick={() => setKeyboardMatrixMode("engines")} className={`mono border-l border-white/20 px-2.5 py-1 text-[8px] uppercase tracking-[0.08em] ${keyboardMatrixMode === "engines" ? "bg-primary text-primary-foreground" : "text-[#a9aca2] hover:text-primary"}`}>音源別</button>
                   </div>
-                  <span className="mono text-[9px] text-[#a9aca2]">{activeMixerTracks.length} ACTIVE · {mutedTracks.length} MUTED</span>
+                  <span className="mono text-[9px] text-[#a9aca2]">{visibleMixerTracks.length} / {activeMixerTracks.length} TRACKS · {mutedTracks.length} MUTED</span>
                 </div>
               </div>
-{activeMixerTracks.length === 0 ? <p className="mono matrix-empty text-xs text-muted-foreground">音源未選択</p> : keyboardMatrixMode === "engines" ? (
+              <div className="matrix-filters" role="group" aria-label="鍵盤の音源フィルター">
+                <span className="mono deck-meta-label">表示</span>
+                {([ ["all", "すべて"], ["opm", "OPM"], ["pcm", "PCM"], ["midi", "MIDI"] ] as const).map(([filter, label]) => <button key={filter} type="button" aria-label={`${label}を表示`} aria-pressed={keyboardEngineFilter === filter} onClick={() => setKeyboardEngineFilter(filter)} className="mono matrix-filter-button">{label}<span>{filter === "all" ? activeMixerTracks.length : mixerTracksByEngine[filter].length}</span></button>)}
+              </div>
+{activeMixerTracks.length === 0 ? <p className="mono matrix-empty text-xs text-muted-foreground">音源未選択</p> : visibleMixerTracks.length === 0 ? <p className="mono matrix-empty text-xs text-muted-foreground" data-testid="keyboard-filter-empty">この曲には{keyboardEngineFilter.toUpperCase()}トラックがありません。</p> : keyboardMatrixMode === "engines" ? (
                 <div className="mt-2 flex flex-col gap-1" data-testid="keyboard-matrix-engines">
                   {ENGINE_BUS_ORDER.map((engine) => {
                     const busTracks = mixerTracksByEngine[engine];
-                    if (!busTracks.length) return null;
+                    if (!busTracks.length || (keyboardEngineFilter !== "all" && keyboardEngineFilter !== engine)) return null;
                     const notes = mergeEngineBusNotes(busTracks, trackKeyState, mutedTracks, engine);
                     const meta = ENGINE_BUS_META[engine];
                     const lit = notes.map((note) => formatMidiNoteName(note)).join(" ");
                     const mutedBusCount = busTracks.filter((track) => mutedTracks.includes(track.index)).length;
-                    return <div key={engine} className="flex items-center gap-2 bg-[#11120f] px-2 py-1.5">
+                    return <div key={engine} data-keyboard-engine={engine} className="matrix-engine-row flex items-center gap-2 bg-[#11120f] px-2 py-1.5">
                       <div className="w-[4.5rem] shrink-0">
                         <p className={`mono m-0 text-[11px] font-medium ${meta.tone}`}>{meta.label}</p>
                         <p className="mono m-0 mt-0.5 text-[7px] uppercase tracking-[0.08em] text-[#8b9085]">{busTracks.length} ch{mutedBusCount ? ` · ${mutedBusCount}m` : ""}</p>
                       </div>
                       <span className={`mono w-16 shrink-0 truncate text-center text-[11px] font-semibold leading-none tracking-tight ${lit ? "text-primary" : "text-[#6f746a]"}`} title={lit || "Awaiting"}>{lit || "·"}</span>
-                      <TrackFullKeyboard label={meta.label} midiNotes={notes} muted={false} dense={false} />
+                      {engine === "pcm" ? <div className="matrix-pcm-pads">{busTracks.map(track => {
+                        const muted = mutedTracks.includes(track.index);
+                        const active = !muted && isPcmVoiceActive(pcmActivityMask, track.pcmVoice ?? 1);
+                        return <span key={track.index} className={`mono matrix-pcm-pad${active ? " is-active" : ""}`} title={`${track.label}${muted ? " · ミュート" : active ? " · 発音中" : " · 待機"}`}>{track.label}</span>;
+                      })}</div> : <TrackFullKeyboard label={meta.label} midiNotes={notes} muted={false} dense={false} />}
                     </div>;
                   })}
                 </div>
               ) : (
                 <div className="mt-2 flex flex-col gap-px bg-white/10" data-testid="keyboard-matrix-tracks">
-                  {activeMixerTracks.map((track) => {
+                  {visibleMixerTracks.map((track) => {
                     const muted = mutedTracks.includes(track.index);
                     const solo = soloTrack === track.index;
                     const isPad = track.engine === "pcm";
                     const tone = track.engine === "opm" ? "text-primary" : isPad ? "text-[#b9c9b1]" : "text-[#a8c5ec]";
                     const keys = trackKeyState[track.index] ?? emptyMidiNotes;
                     const lit = isPad ? "" : (!muted && keys.length > 0 ? keys.map((note) => formatMidiNoteName(note)).join(" ") : "");
-                    return <div key={track.index} className={`flex items-center gap-1.5 bg-[#11120f] px-1.5 py-1 ${muted ? "opacity-55" : ""}`}>
+                    return <div key={track.index} data-keyboard-engine={track.engine} data-testid={`keyboard-track-${track.index}`} className={`flex items-center gap-1.5 bg-[#11120f] px-1.5 py-1 ${muted ? "opacity-55" : ""}`}>
                       <p className={`mono m-0 w-[3.6rem] shrink-0 truncate text-[9px] font-medium ${tone}`} title={track.label}>{track.label}</p>
                       <span className={`mono w-12 shrink-0 truncate text-center text-[11px] font-semibold leading-none tracking-tight ${muted ? "text-[#ff9b94]" : lit ? "text-primary" : "text-[#6f746a]"}`} title={lit || (muted ? "Muted" : isPad ? "Pad · live keyboard" : "Awaiting")}>{muted ? "MUTE" : isPad ? "PAD" : lit || "·"}</span>
                       {isPad
@@ -1911,21 +1983,8 @@ export default function Home() {
                   })}
                 </div>
               )}</div></CompactPanel>
-          <CompactPanel id="playlist" defaultOpen title="プレイリスト" summary={`${playlistEntries.length} 曲`}><div className="compact-playlist" aria-label="プレイリスト" data-testid="saved-playlist">
-                      <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><ListMusic size={15} className="text-primary" /><div><SmallLabel help={<>曲別のループ回数で連続再生し、10秒以下の曲は開始から11秒になるまで無音を入れます。最後の曲で停止します。ローカル曲は同一セッション内のみ（再読込後はリモート曲だけ保存）。<br /><br />ローカルまたはリモートの音源を読み込んで、Add currentでプレイリストへ登録できます。リモートカタログやフォルダ選択で読み込んだ曲も追加されます。</>}>Saved playlist</SmallLabel></div></div><div className="flex flex-wrap gap-1.5"><button onClick={addCurrentSourceToPlaylist} disabled={mode === "mml"} className="mono border border-white/25 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">Add current</button><button onClick={() => playAdjacentPlaylistEntry(-1)} disabled={!playlistEntries.length || playlistIndex === null} className="mono border border-white/20 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-35">Prev</button><button onClick={() => playAdjacentPlaylistEntry(1)} disabled={!playlistEntries.length || playlistIndex === null} className="mono border border-white/20 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-35">Next</button><button onClick={clearPlaylist} disabled={!playlistEntries.length} className="mono border border-[#ff9b94]/35 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#ffb8b2] transition-colors hover:bg-[#ff9b94]/10 disabled:opacity-35">Clear</button><button onClick={() => { const selectedEntry = playlistIndex === null ? undefined : playlistEntries[playlistIndex]; if (selectedEntry) { playlistRunRef.current = true; void playPlaylistEntry(selectedEntry.id); } }} disabled={playlistIndex === null || isPlaying || playbackLoading} className="mono border border-primary/55 px-3 py-2 text-[9px] uppercase tracking-[0.08em] text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:opacity-35">Play selected</button></div></div>
-                    {!playlistEntries.length && <div className="playlist-empty"><p>曲を追加して、ここから連続再生。</p><button type="button" onClick={() => changeSettingsOpen(true)} className="mono settings-toggle"><FolderOpen size={15} />音源・カタログを開く</button></div>}
-                    {playlistEntries.length > 0 && <div className="mt-3 max-h-64 overflow-y-auto border border-white/10 bg-[#11120f]">
-                      {playlistEntries.map((entry, index) => { const pdxMissing = entry.format === "mdx" && Boolean(entry.requiredPdxName) && !entry.pdx; const selected = index === playlistIndex; const loading = loadingSource?.entryId === entry.id; const playing = playingPlaylistEntryId === entry.id && isPlaying; const entryLoops = normalizePlaylistLoopCount(entry.loopCount ?? DEFAULT_PLAYLIST_LOOP_COUNT); return <div key={entry.id} draggable onDragStart={(event) => { setPlaylistDragIndex(index); event.dataTransfer.effectAllowed = "move"; }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (playlistDragIndex !== null) moveEntryInPlaylist(playlistDragIndex, index); setPlaylistDragIndex(null); }} onDragEnd={() => setPlaylistDragIndex(null)} className={`compact-playlist-entry grid grid-cols-[auto_1fr_auto] gap-2 border-b border-white/5 px-3 py-2 last:border-b-0 ${selected ? "bg-primary/[0.08]" : "hover:bg-white/[0.035]"}`}><span className={`mono cursor-grab pt-1 text-[9px] ${selected ? "text-primary" : "text-[#8b9085]"}`}>{String(index + 1).padStart(2, "0")}</span><button type="button" data-testid={`playlist-entry-${index}`} data-playlist-entry-id={entry.id} onClick={() => { playlistRunRef.current = true; void playPlaylistEntry(entry.id); }} className="min-w-0 text-left"><span data-testid={`playlist-entry-title-${index}`} title={entry.title} className="mono block truncate text-[10px] text-[#f5f4ec]">{entry.title}</span><span data-testid={`playlist-entry-path-${index}`} className="mono block truncate pt-0.5 text-[8px] text-[#8b9085]">{entry.origin.toUpperCase()} · {entry.format.toUpperCase()} · {entry.path ?? "remote URL"}</span></button><div className="flex flex-wrap items-center gap-1"><label className="mono flex items-center gap-1 text-[8px] text-[#a9aca2]">×<input aria-label={`${entry.title}のループ回数`} type="number" min={1} max={99} value={entryLoops} onChange={(event) => updatePlaylistEntryLoops(entry.id, Number(event.target.value))} className="mono w-9 border border-white/15 bg-black/20 px-1 py-1 text-center text-[9px] text-[#f5f4ec] outline-none focus:border-primary" /></label><button type="button" aria-label={`${entry.title}を上へ移動`} disabled={index === 0} onClick={() => moveEntryInPlaylist(index, index - 1)} className="mono border border-white/15 px-1.5 py-1 text-[8px] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-25">↑</button><button type="button" aria-label={`${entry.title}を下へ移動`} disabled={index === playlistEntries.length - 1} onClick={() => moveEntryInPlaylist(index, index + 1)} className="mono border border-white/15 px-1.5 py-1 text-[8px] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-25">↓</button><button type="button" aria-label={`${entry.title}をプレイリストから削除`} onClick={() => removeEntryFromPlaylist(entry.id)} className="mono border border-[#ff9b94]/35 px-1.5 py-1 text-[8px] text-[#ffb8b2] hover:bg-[#ff9b94]/10">×</button><span data-testid={`playlist-entry-state-${index}`} className={`mono inline-flex items-center gap-1 self-center text-[8px] uppercase tracking-[0.08em] ${loading || playing ? "text-primary" : pdxMissing ? "text-[#ff9b94]" : "text-[#a9aca2]"}`}>{loading && <LoaderCircle size={10} className="shrink-0 animate-spin" />}{loading ? "LOADING" : pdxMissing ? "PDX missing" : playing ? "playing" : "ready"}</span></div></div>; })}
-                    </div>}
-
-                    <div className="mt-2 flex items-start gap-1 border-t border-white/10 pt-2">
-                      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-[11px] leading-5 text-[#dfe1d8]">
-                        <input type="checkbox" checked={fadeDuringLoad} onChange={event => changeFadeDuringLoad(event.target.checked)} className="shrink-0 accent-primary" />
-                        読込中にフェードアウト
-                      </label>
-                      <HelpTooltip label="読込中のフェードアウト">ONにすると、次の曲の読み込み中に前の曲を約0.6秒でフェードアウトします。OFFでは切り替わるまで前の曲を流し続けます。OPM／PCM／内蔵SoundFontが対象で、外部MIDI機器の音量は変わりません。設定はこのブラウザに保存されます。</HelpTooltip>
-                    </div>
-                  </div></CompactPanel>
+            </div>
+          </div>
         </section>
         <aside id="player-settings" ref={settingsPanelRef} className="program-settings" aria-label="プレーヤー設定" hidden={!settingsOpen}>
           <div className="settings-heading"><div><span className="mono program-deck-label">Settings</span><p>音源・サウンド・タイミング</p></div><button type="button" onClick={() => { changeSettingsOpen(false); settingsToggleRef.current?.focus(); }} className="mono settings-close">閉じる</button></div>

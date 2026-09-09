@@ -1,5 +1,6 @@
 import { OrderedMidiQueue } from "./orderedMidiQueue";
 import { MdrAudioTimeline } from "./mdrAudioTimeline";
+import { extendMdrTrackLoops } from "./mdrTrackLoops";
 
 /* Signal Deck engine: MML is synthesized locally; MDR inspection follows the mpxadrv header and 32-track layout. */
 export type EngineKind = "opm" | "pcm" | "midi";
@@ -952,6 +953,35 @@ export function resolveMdrPlaybackDuration(
   return Math.max(safeHardwareDuration, midiDuration);
 }
 
+export type PlaybackDisplayLoop = { firstPassSeconds: number; cycleSeconds: number };
+
+/** The extractor records the first and second arrivals at the song's loop end.
+ * Its one-loop event buffer therefore includes two passes, plus release events.
+ * Keep that scheduling buffer separate from the single-pass transport clock.
+ */
+export function resolveMdrDisplayLoop(loopWindow?: MdrMidiLoopWindow): PlaybackDisplayLoop | undefined {
+  if (!loopWindow) return undefined;
+  const { startSeconds, endSeconds } = loopWindow;
+  if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || startSeconds < 0 || endSeconds <= startSeconds) return undefined;
+  const cycleSeconds = endSeconds - startSeconds;
+  return { firstPassSeconds: startSeconds > 0 ? startSeconds : cycleSeconds, cycleSeconds };
+}
+
+/** Shows the intro once, then resets both elapsed time and duration for every loop body. */
+export function resolvePlaybackDisplayPosition(elapsed: number, duration: number, loop?: PlaybackDisplayLoop, finalPassEndSeconds?: number): { elapsed: number; duration: number } {
+  const seconds = Number.isFinite(elapsed) ? Math.max(0, elapsed) : 0;
+  if (!loop) return { elapsed: Math.min(Math.max(0, duration), seconds), duration };
+  if (finalPassEndSeconds !== undefined && Number.isFinite(finalPassEndSeconds) && finalPassEndSeconds >= loop.firstPassSeconds) {
+    // A final synth release/fade is not the start of another musical pass.
+    if (seconds >= finalPassEndSeconds) {
+      const finalDuration = finalPassEndSeconds > loop.firstPassSeconds ? loop.cycleSeconds : loop.firstPassSeconds;
+      return { elapsed: finalDuration, duration: finalDuration };
+    }
+  }
+  if (seconds < loop.firstPassSeconds) return { elapsed: seconds, duration: loop.firstPassSeconds };
+  return { elapsed: (seconds - loop.firstPassSeconds) % loop.cycleSeconds, duration: loop.cycleSeconds };
+}
+
 /** Infinite hybrid playback wraps on MXDRV's measured loop boundary, never on a trailing GS MIDI release event. */
 export function resolveMdrInfiniteMidiLoopPeriodSeconds(hardwareDuration: number, playbackDuration: number, hasHardwareRenderer: boolean): number | undefined {
   if (hasHardwareRenderer && Number.isFinite(hardwareDuration) && hardwareDuration > 0) return hardwareDuration;
@@ -1796,7 +1826,10 @@ export async function estimateMdrPlaybackDuration(mdr: ArrayBuffer, pdx: ArrayBu
   const player = new MadrvWasmPlayer();
   const hardware = await player.load(mdr, pdx, 1, 48_000);
   const midiTimeline = await extractMdrMidiEvents(mdr, 1, resolveMdrMidiTimingSampleRate());
-  return resolveMdrPlaybackDuration(hardware.duration, midiTimeline.events, midiTimeline.loopWindow);
+  const cycle = midiTimeline.loopWindow ? resolveMdrHardwareLoopCycleSeconds(hardware.duration, player.measureDuration(2)) : undefined;
+  const trustedLoop = resolveTrustedMdrMidiLoopWindow(midiTimeline.loopWindow, hardware.duration, cycle);
+  return resolveMdrDisplayLoop(trustedLoop)?.firstPassSeconds
+    ?? resolveMdrPlaybackDuration(hardware.duration, midiTimeline.events, trustedLoop);
 }
 
 export class SignalDeckAudio {
@@ -2712,7 +2745,7 @@ export class SignalDeckAudio {
     }, (score.duration + 0.12) * 1000);
   }
 
-  async playMdr(mdr: ArrayBuffer, pdx: ArrayBuffer | undefined, loops: number, onProgress: (seconds: number) => void, onEnd: () => void): Promise<MdrPlaybackInfo> {
+  async playMdr(mdr: ArrayBuffer, pdx: ArrayBuffer | undefined, loops: number, onProgress: (seconds: number, displayDuration?: number) => void, onEnd: () => void): Promise<MdrPlaybackInfo> {
     this.stop();
     const playbackGeneration = this.playbackGeneration;
     const { context, gains } = this.graph;
@@ -2750,7 +2783,13 @@ export class SignalDeckAudio {
     // timing error; the resulting seconds map onto the rendered output frames.
     const midiTimeline = await extractMdrMidiEvents(mdr, measuredLoops, resolveMdrMidiTimingSampleRate());
     const songMidiTimeline = measuredLoops === 1 ? midiTimeline : await extractMdrMidiEvents(mdr, 1, resolveMdrMidiTimingSampleRate());
-    const midiEvents = midiTimeline.events;
+    let midiEvents = midiTimeline.events;
+    if (measuredLoops > 1 && midiEvents.length > 0) {
+      const twoLoopTimeline = measuredLoops === 2 ? midiTimeline : await extractMdrMidiEvents(mdr, 2, resolveMdrMidiTimingSampleRate());
+      const threeLoopTimeline = measuredLoops === 3 ? midiTimeline : await extractMdrMidiEvents(mdr, 3, resolveMdrMidiTimingSampleRate());
+      const songEnd = midiEvents.reduce((end, event) => Math.max(end, event.at), midiTimeline.loopWindow?.endSeconds ?? 0);
+      midiEvents = extendMdrTrackLoops(midiEvents, twoLoopTimeline.events, threeLoopTimeline.events, songEnd);
+    }
     throwIfPlaybackSuperseded(playbackGeneration, this.playbackGeneration);
     const totalHardwareDuration = needsHardwareRenderer && measuredLoops > 1 ? this.mdrPlayer!.measureDuration(measuredLoops) : info.duration;
     // Duration probing mutates the renderer: finish every measurement before
@@ -2771,6 +2810,19 @@ export class SignalDeckAudio {
     const songInfo: MdrPlaybackInfo = {
       ...info,
       duration: resolveMdrPlaybackDuration(info.duration, songMidiTimeline.events, trustedSongMidiLoopWindow),
+    };
+    const displayLoop = resolveMdrDisplayLoop(trustedSongMidiLoopWindow);
+    const finalDisplayPassEnd = displayLoop && loops > 0
+      ? Math.max(
+        midiEvents.length > 0 ? trustedFiniteMidiLoopWindow?.endSeconds ?? 0 : 0,
+        needsHardwareRenderer ? displayLoop.firstPassSeconds + (Math.max(1, loops) - 1) * (hardwareCycleSeconds ?? displayLoop.cycleSeconds) : 0,
+      )
+      : undefined;
+    const displayInfo = { ...songInfo, duration: displayLoop?.firstPassSeconds ?? songInfo.duration };
+    let displayDuration = displayInfo.duration;
+    const publishDisplayProgress = (seconds: number) => {
+      if (displayLoop) onProgress(seconds, displayDuration);
+      else onProgress(seconds);
     };
     const totalPlaybackDuration = resolveMdrPlaybackDuration(totalHardwareDuration, midiEvents, trustedFiniteMidiLoopWindow);
     // The MDR path keeps rendering in the stateful v11 core so actual MXDRV termination
@@ -2846,7 +2898,7 @@ export class SignalDeckAudio {
       if (!isCurrentPlaybackGeneration(playbackGeneration, this.playbackGeneration)) return;
       cancelAnimationFrame(frame);
       this.stop();
-      this.publishProgress(onProgress, songInfo.duration, true);
+      this.publishProgress(publishDisplayProgress, displayDuration, true);
       onEnd();
     };
     const animate = () => {
@@ -2854,8 +2906,11 @@ export class SignalDeckAudio {
       const hardwareMilliseconds = needsHardwareRenderer ? this.mdrPlayer?.getPlayAtMilliseconds() ?? null : null;
       const hardwareTerminated = needsHardwareRenderer && (this.mdrPlayer?.isTerminated() ?? false);
       const elapsed = progressClock.read(context.currentTime - startsAt, hardwareMilliseconds, hardwareTerminated);
-      const displayedElapsed = songInfo.duration > 0 && loops !== 1 ? elapsed % songInfo.duration : Math.min(songInfo.duration, elapsed);
-      this.publishProgress(onProgress, displayedElapsed);
+      const display = displayLoop
+        ? resolvePlaybackDisplayPosition(elapsed, displayInfo.duration, displayLoop, finalDisplayPassEnd)
+        : { elapsed: songInfo.duration > 0 && loops !== 1 ? elapsed % songInfo.duration : Math.min(songInfo.duration, elapsed), duration: songInfo.duration };
+      displayDuration = display.duration;
+      this.publishProgress(publishDisplayProgress, display.elapsed);
       const hardwareDrained = hardwareTerminated && hardwareEndAt !== undefined && context.currentTime >= hardwareEndAt;
       if (loops > 0 && midiTimelineStarted && shouldEndFiniteMdrPlayback(needsHardwareRenderer, hardwareDrained, this.isMdrMidiPlaybackDrained())) {
         finish();
@@ -2892,7 +2947,7 @@ export class SignalDeckAudio {
       };
       this.endTimer = window.setTimeout(checkFiniteEnd, endDelaySeconds * 1000);
     }
-    return songInfo;
+    return displayInfo;
   }
 
   async playMdx(mdx: ArrayBuffer, pdx: ArrayBuffer | undefined, loops: number, onProgress: (seconds: number) => void, onEnd: () => void): Promise<MdrPlaybackInfo> {

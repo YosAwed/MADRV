@@ -105,12 +105,18 @@ try {
     assert.equal(await page.getByTestId(`playlist-entry-state-${index}`).textContent(), "LOADING");
     assert.equal(await page.getByTestId("source-title").textContent(), title);
     assert.equal(await page.getByRole("button", { name: "読み込みを中止", exact: true }).isVisible(), true);
+    assert.equal(await page.getByTestId("playback-playlist-number").textContent(), `Playlist no. ${index + 1} / 3`);
   }
 
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   assert.equal(await page.getByTestId("settings-toggle").getAttribute("aria-expanded"), "false");
   assert.equal(await fade.isChecked(), false);
   await startMml();
+  const filters = page.getByRole("group", { name: "鍵盤の音源フィルター", exact: true });
+  await filters.getByRole("button", { name: "MIDIを表示", exact: true }).click();
+  await waitState("PLAYING");
+  assert.ok(await peak() > 0.001, "Display filtering silenced the playing MML audio");
+  await filters.getByRole("button", { name: "すべてを表示", exact: true }).click();
   await page.getByTestId("playlist-entry-0").click();
   const first = await takeRequest(0);
   await assertLoading(0);
@@ -188,24 +194,50 @@ try {
   await waitUntil(async () => Math.abs(await page.evaluate(() => window.__loadingAudio.master.gain.value) - 0.99) < 0.001, "Next song lost the volume set during loading");
   report.checks.push("Successful next-track playback returns to PLAYING at normal volume");
   await page.getByTestId("settings-toggle").click();
+  await filters.getByRole("button", { name: "MIDIを表示", exact: true }).click();
+  assert.equal(await page.getByTestId("keyboard-filter-empty").isVisible(), true);
+  await waitState("PLAYING");
+  assert.ok(await outputGain() > 0.99, "Display filtering changed output gain");
+  await filters.getByRole("button", { name: "すべてを表示", exact: true }).click();
+  report.checks.push("Engine filtering preserves audible MML playback; filtering out the loaded OPM track leaves playback running at unchanged gain");
 
   for (const width of [1366, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
-    const controls = page.getByRole("group", { name: "再生状況の曲送り", exact: true });
+    const controls = page.getByRole("group", { name: "再生ボタン横の曲送り", exact: true });
     await controls.scrollIntoViewIfNeeded();
     const buttons = await controls.boundingBox();
-    const notice = await page.getByTestId("playback-notice").boundingBox();
+    const stopButton = await page.getByRole("button", { name: "停止", exact: true }).last().boundingBox();
+    const clock = await page.getByTestId("playback-elapsed").boundingBox();
+    const progress = await page.getByRole("progressbar", { name: "再生位置", exact: true }).boundingBox();
+    const percent = await page.getByTestId("playback-position").boundingBox();
+    const bpm = await page.getByTestId("playback-bpm").boundingBox();
+    const playlistNumber = await page.getByTestId("playback-playlist-number").boundingBox();
+    const nextTitle = await page.getByTestId("playlist-up-next").boundingBox();
     const deck = await page.getByTestId("program-deck").boundingBox();
     const matrix = await page.getByTestId("panel-toggle-matrix").boundingBox();
     const playlist = await page.getByTestId("saved-playlist").boundingBox();
     assert.ok(deck && matrix && playlist);
     assert.ok(deck.width > width * 0.9, `Deck is too narrow at ${width}px`);
-    assert.ok(playlist.y > matrix.y && Math.abs(playlist.x - matrix.x) < 20, "Playlist is not below the keyboard in the central deck");
+    const library = await page.getByTestId("deck-library").boundingBox();
+    const playlistPanel = await page.locator('[data-panel="playlist"]').boundingBox();
+    assert.ok(library && playlistPanel);
+    if (library.width >= 740) {
+      assert.ok(Math.abs(playlistPanel.y - matrix.y) < 2 && playlistPanel.x + playlistPanel.width <= matrix.x, "Playlist and keyboard should be side by side, playlist first");
+    } else {
+      assert.ok(playlistPanel.y < matrix.y && Math.abs(playlistPanel.x - matrix.x) < 2, "Playlist should precede the keyboard on narrow screens");
+    }
     assert.equal(await page.locator("#player-settings").isVisible(), false);
     assert.equal(await page.getByRole("group", { name: "出力レベル", exact: true }).isVisible(), true);
-    assert.ok(buttons && notice);
+    assert.ok(buttons && stopButton && clock && progress && percent && bpm && playlistNumber && nextTitle);
     assert.ok(buttons.x >= 0 && buttons.x + buttons.width <= width, `Navigation overflows at ${width}px`);
-    assert.ok(buttons.y <= notice.y + notice.height + 10, `Navigation too far from notice at ${width}px`);
+    assert.ok(Math.abs(buttons.y - stopButton.y) < 2 && buttons.x >= stopButton.x + stopButton.width && buttons.x < stopButton.x + stopButton.width + 12, `Prev/Next are not directly beside Stop at ${width}px`);
+    assert.ok(clock.x < progress.x && progress.x < percent.x && percent.x < bpm.x, "Time, progress, percent and BPM are in the wrong order");
+    assert.ok(Math.abs(clock.y - bpm.y) < 4 && Math.abs(clock.y - percent.y) < 4, "Time/progress/BPM should occupy one line");
+    assert.ok(playlistNumber.y > bpm.y + bpm.height && nextTitle.y >= playlistNumber.y - 4, "Playlist number and next title should be on the following line");
+    assert.equal(await page.getByTestId("playback-playlist-number").textContent(), "Playlist no. 2 / 3");
+    assert.match(await page.getByTestId("playback-elapsed").textContent(), /^\d+:\d{2} \/ \d+:\d{2}$/);
+    assert.equal(await page.getByRole("slider", { name: "再生位置", exact: true }).count(), 0);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Page overflows at ${width}px`);
     assert.ok(await page.getByRole("button", { name: "Prev", exact: true }).count() === 1);
     assert.ok(await page.getByRole("button", { name: "Next", exact: true }).count() === 1);
     await page.screenshot({ path: `${out}/notice-navigation-${width}.png`, fullPage: true });
@@ -216,7 +248,7 @@ try {
   previous.release({});
   await waitState("PLAYING");
   assert.equal(await page.getByTestId("playlist-entry-state-0").textContent(), "playing");
-  report.checks.push("Notice navigation stays nearby at 1366/768/390/320px; Next works during loading and Prev starts the previous track; original controls remain");
+  report.checks.push("At 1366/768/390/320px, Prev/Next sit beside Stop; time/progress/percent/BPM share one line, with playlist number and next title beneath; no horizontal overflow");
 
   await page.getByTestId("playlist-entry-2").click();
   const failed = await takeRequest(2);
@@ -280,7 +312,8 @@ try {
   await page.getByTestId("playlist-entry-0").click();
   (await takeRequest(0)).release({});
   await waitState("PLAYING");
-  assert.match(await page.getByTestId("playlist-up-next").textContent(), /2 \/ 3/);
+  assert.equal(await page.getByTestId("playback-playlist-number").textContent(), "Playlist no. 1 / 3");
+  assert.match(await page.getByTestId("playlist-up-next").textContent(), /Signal Deck Diagnostic/);
   const automatic = await takeRequest(1);
   await waitState("LOADING");
   assert.match(await page.getByTestId("playlist-up-next").textContent(), /Failed track/);
