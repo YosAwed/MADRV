@@ -1802,6 +1802,7 @@ export async function estimateMdrPlaybackDuration(mdr: ArrayBuffer, pdx: ArrayBu
 export class SignalDeckAudio {
   private context?: AudioContext;
   private masterGain?: GainNode;
+  private loadingGain?: GainNode;
   private gains?: Record<EngineKind, GainNode>;
   private activeNodes: AudioScheduledSourceNode[] = [];
   private timers: number[] = [];
@@ -1897,7 +1898,10 @@ export class SignalDeckAudio {
     const context = new AudioContext({ sampleRate: MADRV_NATIVE_SAMPLE_RATE });
     const master = context.createGain();
     master.gain.value = 0.78;
-    master.connect(context.destination);
+    const loading = context.createGain();
+    loading.gain.value = 1;
+    master.connect(loading);
+    loading.connect(context.destination);
     const gains = {
       opm: context.createGain(),
       pcm: context.createGain(),
@@ -1909,6 +1913,7 @@ export class SignalDeckAudio {
     gains.midi.gain.value = 0.72;
     this.context = context;
     this.masterGain = master;
+    this.loadingGain = loading;
     this.gains = gains;
     return { context, master, gains };
   }
@@ -2111,6 +2116,19 @@ export class SignalDeckAudio {
   }
 
   setMaster(value: number) { this.graph.master.gain.setTargetAtTime(value / 100, this.graph.context.currentTime, 0.015); }
+  /** Attenuate browser audio during source loading without changing the user's volume. */
+  setLoadingFade(enabled: boolean) {
+    if (!this.context || !this.loadingGain) return;
+    const gain = this.loadingGain.gain;
+    const now = this.context.currentTime;
+    if (typeof gain.cancelAndHoldAtTime === "function") gain.cancelAndHoldAtTime(now);
+    else {
+      const current = gain.value;
+      gain.cancelScheduledValues(now);
+      gain.setValueAtTime(current, now);
+    }
+    gain.linearRampToValueAtTime(enabled ? 0 : 1, now + (enabled ? 0.6 : 0.03));
+  }
   setLevel(engine: EngineKind, value: number) {
     const next = value / 100;
     if (engine === "midi") this.midiOutputLevel = next;
@@ -2665,6 +2683,7 @@ export class SignalDeckAudio {
     this.silenceMdrSoundFont();
     this.gsSynth?.stopAll(true);
     if (this.midiOutput) for (let channel = 0; channel < 16; channel += 1) this.sendHardware([0xb0 | channel, 123, 0], `停止: Ch ${channel + 1} All Notes Off`);
+    this.setLoadingFade(false);
   }
 
   async play(score: CompiledMml, onProgress: (seconds: number) => void, onEnd: () => void) {

@@ -13,7 +13,7 @@ export type SavedPlaylistEntry = {
 
 export const SAVED_PLAYLIST_STORAGE_KEY = "madrv-player.playlist-v1";
 export const DEFAULT_PLAYLIST_LOOP_COUNT = 2;
-const MAX_PLAYLIST_ENTRIES = 200;
+export const MAX_PLAYLIST_ENTRIES = 300;
 
 export function normalizePlaylistLoopCount(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_PLAYLIST_LOOP_COUNT;
@@ -68,4 +68,18 @@ export function movePlaylistEntry(current: SavedPlaylistEntry[], fromIndex: numb
 
 export function setPlaylistEntryLoopCount(current: SavedPlaylistEntry[], id: string, loopCount: number): SavedPlaylistEntry[] {
   return current.map((entry) => entry.id === id ? { ...entry, loopCount: normalizePlaylistLoopCount(loopCount) } : entry);
+}
+
+/** Catalog IDs and URL-based IDs can both refer to the same loaded song. */
+export function updateRemotePlaylistTitle<T extends Pick<SavedPlaylistEntry, "origin" | "remoteMdrUrl" | "title">>(current: T[], mdrUrl: string, title: string): T[] {
+  const url = mdrUrl.trim();
+  const nextTitle = title.trim();
+  if (!url || !nextTitle) return current;
+  let changed = false;
+  const next = current.map(entry => {
+    if (entry.origin !== "remote" || entry.remoteMdrUrl?.trim() !== url || entry.title === nextTitle) return entry;
+    changed = true;
+    return { ...entry, title: nextTitle };
+  });
+  return changed ? next : current;
 }

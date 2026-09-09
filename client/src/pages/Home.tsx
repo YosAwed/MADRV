@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { ChangeEvent, DragEvent, lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { compileMml, extractMmlInitialTempo, fetchRemoteCatalog, fetchRemoteSoundFont, fetchSharedSoundFont, formatMidiNoteName, formatPdxFileName, inspectMadrvSource, inspectMdr, inspectMdx, isGoogleDriveShareUrl, isGsMidiEngineArmed, isMidiPlaybackDestinationReady, isOpmPcmEngineArmed, isPcmPdxEngineArmed, isPcmVoiceActive, isSafariBrowserUserAgent, isSignedTimingCorrectionDraft, limitScore, listMdrMixerTracks, mdrRequiresPdx, MdrInfo, MdrMixerTrack, MdxInfo, MidiDiagnosticEntry, MidiOutputDevice, MmlSyntaxError, normalizeExternalMidiAdvanceMs, normalizeRemoteAssetUrl, normalizeSoundFontMdrDelayMs, normalizeSoundFontMdrDelayProfiles, parseRemoteCatalogPayload, playbackProgressPercent, recommendPlaybackTuning, recommendSoundFontMdrDelayMs, RemoteCatalogEntry, requiresStableMadrvProfileForHybridTracks, requiresStableMadrvProfileForSoundFont, resolveNextPlaylistIndex, resolvePlaylistInterTrackSilenceSeconds, resolveSoundFontMdrDelayProfile, resolveSoundFontMdrSyncResidualMs, resolveSoundFontMdrTimingComparisonDelay, setSoundFontMdrDelayProfile, SignalDeckAudio, stepSoundFontMdrDelayMs, timerBToEstimatedBpm, updateSoundFontMdrDelayMeasurement, type MdrMidiSyncSnapshot, type MdrTrackKeyState, type PlaybackLoadProbe, type PlaybackPerformanceProfile, type PlaybackTuningPreset, type PlaybackTuningRecommendation, type SoundFontMdrDelayMeasurement, type SoundFontMdrDelayProfiles, type SoundFontMdrTimingComparisonMode } from "@/lib/madrvEngine";
-import { DEFAULT_PLAYLIST_LOOP_COUNT, isPersistablePlaylistEntry, movePlaylistEntry, normalizePlaylistLoopCount, parseSavedPlaylist, SAVED_PLAYLIST_STORAGE_KEY, setPlaylistEntryLoopCount, type SavedPlaylistEntry } from "@/lib/playlistEntries";
+import { DEFAULT_PLAYLIST_LOOP_COUNT, isPersistablePlaylistEntry, movePlaylistEntry, normalizePlaylistLoopCount, parseSavedPlaylist, SAVED_PLAYLIST_STORAGE_KEY, setPlaylistEntryLoopCount, updateRemotePlaylistTitle, type SavedPlaylistEntry } from "@/lib/playlistEntries";
 import { parseRecentSources, RECENT_SOURCES_STORAGE_KEY, removeRecentSource, upsertRecentSource, type RecentSource } from "@/lib/recentSources";
 import { persistLocalSoundFontSelection, persistRemoteSoundFontSelection, readCachedLocalSoundFont, readPersistedSoundFontSelection } from "@/lib/soundFontStorage";
 import { useIsMobile } from "@/hooks/useMobile";
@@ -319,6 +319,18 @@ function PlaybackAdvisorPanel({ diagnosis, activeProfile, tuningPreset, safariCo
 export default function Home() {
   const isMobile = useIsMobile();
   const isSafari = useMemo(() => typeof navigator !== "undefined" && isSafariBrowserUserAgent(navigator.userAgent), []);
+  const [settingsOpen, setSettingsOpen] = useState(() => {
+    try { return window.localStorage.getItem("madrv-player.settings-open-v1") === "true"; } catch { return false; }
+  });
+  const settingsPanelRef = useRef<HTMLElement>(null);
+  const settingsToggleRef = useRef<HTMLButtonElement>(null);
+  function changeSettingsOpen(open: boolean) {
+    setSettingsOpen(open);
+    try { window.localStorage.setItem("madrv-player.settings-open-v1", String(open)); } catch { /* Keep the setting for this session. */ }
+    if (open && window.matchMedia("(max-width: 1000px)").matches) {
+      window.requestAnimationFrame(() => settingsPanelRef.current?.scrollIntoView({ block: "start" }));
+    }
+  }
   const [mode, setMode] = useState<SourceMode>("local");
   const [mml, setMml] = useState(defaultMml);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -336,6 +348,13 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPreparingPlayback, setIsPreparingPlayback] = useState(false);
+  const [loadingSource, setLoadingSource] = useState<{ requestId: number; title: string; entryId?: string } | null>(null);
+  const [playingPlaylistEntryId, setPlayingPlaylistEntryId] = useState<string | null>(null);
+  const [fadeDuringLoad, setFadeDuringLoad] = useState(() => {
+    try { return window.localStorage.getItem("madrv-player.fade-during-load-v1") === "true"; } catch { return false; }
+  });
+  const fadeDuringLoadRef = useRef(fadeDuringLoad);
+  const playbackLoading = loadingSource !== null || isPreparingPlayback;
   const [audioSampleRate, setAudioSampleRate] = useState(48_000);
   const [audioLatencyInfo, setAudioLatencyInfo] = useState({ sampleRate: 48_000, outputLatencySeconds: 0, baseLatencySeconds: 0 });
   const [soundFontMdrDelayMeasurement, setSoundFontMdrDelayMeasurement] = useState<SoundFontMdrDelayMeasurement | null>(null);
@@ -343,6 +362,7 @@ export default function Home() {
   const [hardwarePlaybackPositionMs, setHardwarePlaybackPositionMs] = useState<number | null>(null);
   const [mdrMidiSync, setMdrMidiSync] = useState<MdrMidiSyncSnapshot | null>(null);
   const [volume, setVolume] = useState(78);
+  const volumeRef = useRef(volume);
   const [opmLevel, setOpmLevel] = useState(82);
   const [pcmLevel, setPcmLevel] = useState(82);
   const [midiLevel, setMidiLevel] = useState(72);
@@ -363,7 +383,11 @@ export default function Home() {
   });
   const [playlistEntries, setPlaylistEntries] = useState<PlaylistEntry[]>(() => {
     try {
-      const parsed = parseSavedPlaylist(JSON.parse(window.localStorage.getItem(SAVED_PLAYLIST_STORAGE_KEY) ?? "[]"));
+      let parsed = parseSavedPlaylist(JSON.parse(window.localStorage.getItem(SAVED_PLAYLIST_STORAGE_KEY) ?? "[]"));
+      // Repair names saved before loaded titles were synchronized to the playlist.
+      for (const source of [...recentSources].reverse()) {
+        if (source.kind === "remote" && source.mdrUrl) parsed = updateRemotePlaylistTitle(parsed, source.mdrUrl, source.label);
+      }
       window.localStorage.setItem(SAVED_PLAYLIST_STORAGE_KEY, JSON.stringify(parsed));
       return parsed;
     } catch {
@@ -433,6 +457,7 @@ export default function Home() {
   const [formatGuideOpen, setFormatGuideOpen] = useState(false);
   const [notice, setNotice] = useState("音源未選択");
   const [remoteLoading, setRemoteLoading] = useState(false);
+  const [catalogLoading, setCatalogLoading] = useState(false);
   const [mdrInfo, setMdrInfo] = useState<MdrInfo | null>(null);
   const [mdrEstimatedDuration, setMdrEstimatedDuration] = useState<number | null | undefined>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -449,6 +474,8 @@ export default function Home() {
   const sessionInitialSourceKeyRef = useRef<string | null>(null);
   const playlistRunRef = useRef(false);
   const playlistStartRequestRef = useRef(0);
+  const sourceLoadAbortRef = useRef<AbortController | null>(null);
+  const preparingRequestRef = useRef<number | null>(null);
   const diagnosisRequestRef = useRef(0);
   const publicStorage = trpc.publicStorage.fetchAsset.useMutation();
   const sharedSessionCreate = trpc.sharedSession.create.useMutation();
@@ -466,6 +493,57 @@ export default function Home() {
     return audioRef.current;
   }
 
+  function cancelSourceTransition() {
+    playlistStartRequestRef.current += 1;
+    sourceLoadAbortRef.current?.abort();
+    sourceLoadAbortRef.current = null;
+    if (preparingRequestRef.current !== null) {
+      audio().stop();
+      setIsPlaying(false);
+      setPlayingPlaylistEntryId(null);
+    }
+    preparingRequestRef.current = null;
+    setIsPreparingPlayback(false);
+    setRemoteLoading(false);
+    setLoadingSource(null);
+    audio().setLoadingFade(false);
+  }
+
+  function beginSourceTransition(title: string, entryId?: string) {
+    cancelSourceTransition();
+    const requestId = playlistStartRequestRef.current;
+    setLoadingSource({ requestId, title, entryId });
+    audio().setLoadingFade(fadeDuringLoadRef.current);
+    setNotice(`LOADING — 「${title}」を読み込んでいます。停止で中止できます。`);
+    return requestId;
+  }
+
+  function finishSourceTransition(requestId: number) {
+    if (requestId !== playlistStartRequestRef.current) return;
+    sourceLoadAbortRef.current = null;
+    preparingRequestRef.current = null;
+    setIsPreparingPlayback(false);
+    setLoadingSource(null);
+    audio().setLoadingFade(false);
+  }
+
+  function stopPlayback() {
+    cancelSourceTransition();
+    playlistRunRef.current = false;
+    audio().stop();
+    setIsPlaying(false);
+    setPlayingPlaylistEntryId(null);
+    setElapsed(0);
+    setNotice("再生を停止しました。");
+  }
+
+  function changeFadeDuringLoad(enabled: boolean) {
+    fadeDuringLoadRef.current = enabled;
+    setFadeDuringLoad(enabled);
+    try { window.localStorage.setItem("madrv-player.fade-during-load-v1", String(enabled)); } catch { /* Preference remains active for this session. */ }
+    if (loadingSource) audio().setLoadingFade(enabled);
+  }
+
   function ensureMidiPlaybackDestination(needsMidi: boolean): boolean {
     const ready = isMidiPlaybackDestinationReady(soundFontByteLength > 0, midiOutputMode === "hardware" && Boolean(selectedMidiDevice));
     if (!needsMidi || ready) return true;
@@ -473,6 +551,7 @@ export default function Home() {
     setIsPlaying(false);
     setIsPreparingPlayback(false);
     setNotice("この曲にはGS MIDIトラックがあります。SoundFont bankでSF2/DLSを読み込むか、External MIDIを選択するまで再生は開始しません。");
+    changeSettingsOpen(true);
     soundFontPanelRef.current?.reveal();
     window.requestAnimationFrame(() => {
       soundFontBankButtonRef.current?.focus({ preventScroll: true });
@@ -834,6 +913,7 @@ export default function Home() {
   }
 
   async function loadLocalFiles(files: File[]) {
+    if (playbackLoading) stopPlayback();
     await maybeRevertSessionSoundFontBeforeSourceLoad();
     const mdrFile = files.find((file) => file.name.toLowerCase().endsWith(".mdr"));
     const mdxFile = files.find((file) => file.name.toLowerCase().endsWith(".mdx"));
@@ -913,6 +993,7 @@ export default function Home() {
   }
 
   async function loadLocalFolder(files: File[]) {
+    if (playbackLoading) stopPlayback();
     await maybeRevertSessionSoundFontBeforeSourceLoad();
     const sources = files.filter((file) => /\.(mdr|mdx)$/i.test(file.name)).sort((left, right) => (left.webkitRelativePath || left.name).localeCompare(right.webkitRelativePath || right.name, "ja"));
     const pdxFiles = files.filter((file) => /\.pdx$/i.test(file.name));
@@ -948,7 +1029,7 @@ export default function Home() {
       });
       setPlaylistIndex((current) => current ?? (entries.length ? 0 : null));
       playlistRunRef.current = false;
-      playlistStartRequestRef.current += 1;
+      cancelSourceTransition();
       setNotice(`ローカルフォルダから${entries.length}曲をプレイリストへ追加しました。各曲は初期設定で${DEFAULT_PLAYLIST_LOOP_COUNT}回ループします。PDX未一致の曲は一覧で確認できます。`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "ローカルフォルダをプレイリストとして読み込めませんでした。");
@@ -1199,12 +1280,16 @@ export default function Home() {
     await loadLocalFiles(Array.from(event.dataTransfer.files ?? []));
   }
 
-  async function loadRemoteEntry(mdrUrl: string, pdxUrl?: string, label?: string): Promise<{ source: ArrayBuffer; pdx?: ArrayBuffer; format: "mdr" | "mdx"; title: string } | undefined> {
-    await maybeRevertSessionSoundFontBeforeSourceLoad(sourceKeyForRemote(mdrUrl, pdxUrl));
+  async function loadRemoteEntry(mdrUrl: string, pdxUrl?: string, label?: string, playbackRequestId?: number): Promise<{ source: ArrayBuffer; pdx?: ArrayBuffer; format: "mdr" | "mdx"; title: string } | undefined> {
+    const ownsTransition = playbackRequestId === undefined;
+    const requestId = playbackRequestId ?? beginSourceTransition(label?.trim() || playlistTitleFromUrl(mdrUrl));
+    const isCurrent = () => requestId === playlistStartRequestRef.current;
+    const controller = new AbortController();
+    sourceLoadAbortRef.current = controller;
     setRemoteLoading(true);
-    setMdrInfo(null);
-    setMdrEstimatedDuration(null);
     try {
+      await maybeRevertSessionSoundFontBeforeSourceLoad(sourceKeyForRemote(mdrUrl, pdxUrl));
+      if (!isCurrent()) return undefined;
       const fetchBinary = async (url: string, kind: "mdr" | "mdx" | "pdx") => {
         if (isCloudShareLink(url)) {
           const proxied = await publicStorage.mutateAsync({ url, kind });
@@ -1212,7 +1297,7 @@ export default function Home() {
         }
         let response: Response;
         try {
-          response = await fetch(normalizeRemoteAssetUrl(url), { mode: "cors" });
+          response = await fetch(normalizeRemoteAssetUrl(url), { mode: "cors", signal: controller.signal });
         } catch {
           throw new Error(`${kind.toUpperCase()} URLを取得できませんでした。CORS対応URLか、Google Drive／Dropboxの公開共有リンクを指定してください。`);
         }
@@ -1224,8 +1309,16 @@ export default function Home() {
         fetchBinary(mdrUrl.trim(), requestedFormat),
         pdxUrl?.trim() ? fetchBinary(pdxUrl.trim(), "pdx") : undefined,
       ]);
+      if (!isCurrent()) return undefined;
       const detected = inspectMadrvSource(source);
       const title = detected.info.title.trim() || label?.trim() || `REMOTE ${detected.format.toUpperCase()}`;
+      if (ownsTransition) {
+        audio().stop();
+        setIsPlaying(false);
+        setPlayingPlaylistEntryId(null);
+        setElapsed(0);
+        setDuration(0);
+      }
       if (detected.format === "mdr") {
         void diagnoseLoadedSource(source, pdx, detected.info.hardwareTracks, detected.info.midiTracks);
         setMdrInfo(detected.info);
@@ -1241,14 +1334,27 @@ export default function Home() {
       setRemoteMdr(mdrUrl.trim());
       setRemotePdx(pdxUrl?.trim() ?? "");
       setMode("remote");
+      setPlaylistEntries(current => updateRemotePlaylistTitle(current, mdrUrl, title));
+      const updateCatalogTitle = (entries: RemoteCatalogEntry[]) => entries.map(entry => entry.mdrUrl.trim() === mdrUrl.trim() && entry.title !== title ? { ...entry, title } : entry);
+      setCatalogEntries(updateCatalogTitle);
+      setFavoriteEntries(updateCatalogTitle);
+      setLoadingSource(current => current?.requestId === requestId ? { ...current, title } : current);
       rememberRecentSource({ id: `remote:${mdrUrl.trim()}`, kind: "remote", label: title, format: detected.format, mdrUrl: mdrUrl.trim(), pdxUrl: pdxUrl?.trim() || undefined });
       setNotice(`リモート${detected.format.toUpperCase()}を読込みました。${title}${detected.format === "mdr" ? ` / ${detected.info.activeTracks} active tracks` : detected.info.pdxName ? ` / PDX ${formatPdxFileName(detected.info.pdxName)}` : " / PDXなし"}。データはブラウザのメモリ内だけで再生します。`);
       return { source, pdx, format: detected.format, title };
     } catch (error) {
+      if (!isCurrent()) return undefined;
+      if (!ownsTransition) throw error;
+      audio().stop();
+      setIsPlaying(false);
+      setPlayingPlaylistEntryId(null);
       setNotice(error instanceof Error ? error.message : "リモートMDR／MDXを取得できませんでした。");
       return undefined;
     } finally {
-      setRemoteLoading(false);
+      if (isCurrent()) {
+        setRemoteLoading(false);
+        if (ownsTransition) finishSourceTransition(requestId);
+      }
     }
   }
 
@@ -1265,7 +1371,7 @@ export default function Home() {
       setNotice("先にCORS対応のカタログJSON URLを入力してください。");
       return;
     }
-    setRemoteLoading(true);
+    setCatalogLoading(true);
     try {
       const trimmedCatalogUrl = catalogUrl.trim();
       const entries = isCloudShareLink(trimmedCatalogUrl)
@@ -1279,13 +1385,13 @@ export default function Home() {
       });
       setPlaylistIndex((current) => current ?? (playlistItems.length ? 0 : null));
       playlistRunRef.current = false;
-      playlistStartRequestRef.current += 1;
+      cancelSourceTransition();
       setCatalogQuery("");
       setNotice(`リモートフォルダ／JSONから${entries.length}曲をプレイリストへ追加しました。各曲は初期設定で${DEFAULT_PLAYLIST_LOOP_COUNT}回ループします。`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "リモートカタログを取得できませんでした。");
     } finally {
-      setRemoteLoading(false);
+      setCatalogLoading(false);
     }
   }
 
@@ -1316,9 +1422,7 @@ export default function Home() {
   }
 
   function clearPlaylist() {
-    playlistStartRequestRef.current += 1;
-    playlistRunRef.current = false;
-    audio().stop();
+    stopPlayback();
     setPlaylistEntries([]);
     setPlaylistIndex(null);
     setIsPlaying(false);
@@ -1326,6 +1430,7 @@ export default function Home() {
   }
 
   function removeEntryFromPlaylist(entryId: string) {
+    if (loadingSource?.entryId === entryId) stopPlayback();
     const removedIndex = playlistEntries.findIndex((entry) => entry.id === entryId);
     setPlaylistEntries((current) => current.filter((entry) => entry.id !== entryId));
     setPlaylistIndex((current) => current === null ? null : current === removedIndex ? null : current > removedIndex ? current - 1 : current);
@@ -1385,18 +1490,18 @@ export default function Home() {
   }
 
   async function playPlaylistEntry(entryId: string) {
-    const requestId = ++playlistStartRequestRef.current;
     const index = playlistEntries.findIndex((candidate) => candidate.id === entryId);
     const entry = index >= 0 ? playlistEntries[index] : undefined;
     if (!entry) {
       setNotice("選択したプレイリスト項目が見つかりません。");
       return;
     }
+    const requestId = beginSourceTransition(entry.title, entry.id);
     setPlaylistIndex(index);
     try {
       let source: { source: ArrayBuffer; pdx?: ArrayBuffer; format: "mdr" | "mdx"; title: string } | undefined;
       if (entry.origin === "remote") {
-        source = await loadRemoteEntry(entry.remoteMdrUrl ?? "", entry.remotePdxUrl, entry.title);
+        source = await loadRemoteEntry(entry.remoteMdrUrl ?? "", entry.remotePdxUrl, entry.title, requestId);
       } else if (entry.source) {
         if (entry.format === "mdx" && entry.requiredPdxName && !entry.pdx) throw new Error(`必要PDX「${formatPdxFileName(entry.requiredPdxName)}」がフォルダ内に見つかりません。`);
         source = { source: entry.source, pdx: entry.pdx, format: entry.format, title: entry.title };
@@ -1440,13 +1545,17 @@ export default function Home() {
       if (requestId !== playlistStartRequestRef.current) return;
       if (!source) throw new Error("プレイリストの曲データを取得できませんでした。");
       const playbackMdrInfo = source.format === "mdr" ? inspectMdr(source.source) : null;
-      if (!ensureMidiPlaybackDestination((playbackMdrInfo?.midiTracks ?? 0) > 0)) return;
+      if (!ensureMidiPlaybackDestination((playbackMdrInfo?.midiTracks ?? 0) > 0)) {
+        audio().stop();
+        setPlayingPlaylistEntryId(null);
+        return;
+      }
       // Playlist transitions can start before React applies the new source's
       // diagnosis. Choose the actual buffer profile before creating its node.
       const sourceProfile = tuningPreset === "auto" && requiresStableMadrvProfileForHybridTracks(playbackMdrInfo?.hardwareTracks ?? 0, playbackMdrInfo?.midiTracks ?? 0, midiOutputMode === "soundfont") ? "mobile" : activePerformanceProfile;
       audio().setPerformanceProfile(sourceProfile, safariCompatibilityMode);
       setElapsed(0);
-      audio().setMaster(volume);
+      audio().setMaster(volumeRef.current);
       audio().setLevel("opm", opmLevel);
       audio().setLevel("pcm", pcmLevel);
       audio().setLevel("midi", midiLevel);
@@ -1463,12 +1572,13 @@ export default function Home() {
             void playPlaylistEntry(playlistEntries[nextIndex]!.id);
           };
           void revertSessionSoundFontIfNeeded().then(() => {
+            if (requestId !== playlistStartRequestRef.current || !playlistRunRef.current) return;
             if (silenceSeconds > 0) {
               setIsPlaying(false);
-              setNotice(`「${entry.title}」を${entryLoopCount}回再生しました。短い曲のため${silenceSeconds.toFixed(1)}秒の無音後に次の曲へ進みます（${nextIndex + 1} / ${playlistEntries.length}）。`);
+              setNotice(`「${source.title}」を${entryLoopCount}回再生しました。短い曲のため${silenceSeconds.toFixed(1)}秒の無音後に次の曲へ進みます（${nextIndex + 1} / ${playlistEntries.length}）。`);
               window.setTimeout(playNext, silenceSeconds * 1000);
             } else {
-              setNotice(`「${entry.title}」を${entryLoopCount}回再生しました。次の曲へ進みます（${nextIndex + 1} / ${playlistEntries.length}）。`);
+              setNotice(`「${source.title}」を${entryLoopCount}回再生しました。次の曲へ進みます（${nextIndex + 1} / ${playlistEntries.length}）。`);
               playNext();
             }
           });
@@ -1476,24 +1586,35 @@ export default function Home() {
         }
         playlistRunRef.current = false;
         setIsPlaying(false);
-        setNotice(`プレイリスト最終曲「${entry.title}」を${normalizePlaylistLoopCount(entry.loopCount ?? DEFAULT_PLAYLIST_LOOP_COUNT)}回再生しました。再生を停止しました。`);
+        setPlayingPlaylistEntryId(null);
+        setNotice(`プレイリスト最終曲「${source.title}」を${normalizePlaylistLoopCount(entry.loopCount ?? DEFAULT_PLAYLIST_LOOP_COUNT)}回再生しました。再生を停止しました。`);
       };
+      preparingRequestRef.current = requestId;
+      setIsPreparingPlayback(true);
+      setIsPlaying(false);
+      setPlayingPlaylistEntryId(null);
+      const onProgress = (seconds: number) => { if (requestId === playlistStartRequestRef.current) setElapsed(seconds); };
       const rendered = source.format === "mdx"
-        ? await audio().playMdx(source.source, source.pdx, entryLoopCount, setElapsed, onEnd)
-        : await audio().playMdr(source.source, source.pdx, entryLoopCount, setElapsed, onEnd);
+        ? await audio().playMdx(source.source, source.pdx, entryLoopCount, onProgress, onEnd)
+        : await audio().playMdr(source.source, source.pdx, entryLoopCount, onProgress, onEnd);
       if (requestId !== playlistStartRequestRef.current) return;
       singleLoopDuration = rendered.duration;
       setDuration(rendered.duration);
       refreshAudioClock();
       setIsPlaying(true);
-      setNotice(`プレイリスト ${index + 1} / ${playlistEntries.length}「${entry.title}」を${entryLoopCount}回ループで再生中です。`);
+      setPlayingPlaylistEntryId(entry.id);
+      setNotice(`プレイリスト ${index + 1} / ${playlistEntries.length}「${source.title}」を${entryLoopCount}回ループで再生中です。`);
     } catch (error) {
       if (requestId !== playlistStartRequestRef.current) return;
+      audio().stop();
+      setIsPlaying(false);
+      setPlayingPlaylistEntryId(null);
       const message = error instanceof Error ? error.message : "プレイリストの曲を再生できませんでした。";
       const nextIndex = resolveNextPlaylistIndex(index, playlistEntries.length);
       if (playlistRunRef.current && nextIndex !== null) {
         setNotice(`${message} 次の曲へ進みます（${nextIndex + 1} / ${playlistEntries.length}）。`);
         void revertSessionSoundFontIfNeeded().then(() => {
+          if (requestId !== playlistStartRequestRef.current || !playlistRunRef.current) return;
           void playPlaylistEntry(playlistEntries[nextIndex]!.id);
         });
         return;
@@ -1501,29 +1622,30 @@ export default function Home() {
       playlistRunRef.current = false;
       setIsPlaying(false);
       setNotice(message);
+    } finally {
+      finishSourceTransition(requestId);
     }
   }
 
   async function togglePlayback() {
-    if (isPlaying || isPreparingPlayback) {
-      playlistStartRequestRef.current += 1;
-      audio().stop();
-      playlistRunRef.current = false;
-      setIsPlaying(false);
-      setIsPreparingPlayback(false);
-      setNotice("再生を停止しました。");
+    if (isPlaying || playbackLoading) {
+      stopPlayback();
       return;
     }
+    if (playlistEntries.length && playlistIndex !== null) {
+      const selectedEntry = playlistEntries[playlistIndex];
+      if (!selectedEntry) { setNotice("選択したプレイリスト項目が見つかりません。"); return; }
+      playlistRunRef.current = true;
+      await playPlaylistEntry(selectedEntry.id);
+      return;
+    }
+    const requestId = beginSourceTransition(sourceTitle);
+    const isCurrent = () => requestId === playlistStartRequestRef.current;
+    const onProgress = (seconds: number) => { if (isCurrent()) setElapsed(seconds); };
+    preparingRequestRef.current = requestId;
     setIsPreparingPlayback(true);
     setNotice(mode === "mml" ? "MML再生を準備しています…" : "MDR／MDX再生を準備しています。初回はWebAssembly音源の読込に少し時間がかかることがあります。もう一度押すと中止します。");
     try {
-      if (playlistEntries.length && playlistIndex !== null) {
-        const selectedEntry = playlistEntries[playlistIndex];
-        if (!selectedEntry) throw new Error("選択したプレイリスト項目が見つかりません。");
-        playlistRunRef.current = true;
-        await playPlaylistEntry(selectedEntry.id);
-        return;
-      }
       if (mode !== "mml") {
         const source = mode === "local" ? (localMdr ? { source: localMdr, pdx: localPdx, format: localSourceFormat ?? "mdr" } : null) : remoteSource;
         if (!source) throw new Error("先にMDR／MDXファイルまたはCORS許可済みの共有URLを読み込んでください。");
@@ -1540,19 +1662,22 @@ export default function Home() {
         const sourceProfile = tuningPreset === "auto" && requiresStableMadrvProfileForHybridTracks(playbackMdrInfo?.hardwareTracks ?? 0, playbackMdrInfo?.midiTracks ?? 0, midiOutputMode === "soundfont") ? "mobile" : activePerformanceProfile;
         audio().setPerformanceProfile(sourceProfile, safariCompatibilityMode);
         setElapsed(0);
-        audio().setMaster(volume);
+        audio().setMaster(volumeRef.current);
         audio().setLevel("opm", opmLevel);
         audio().setLevel("pcm", pcmLevel);
         audio().setLevel("midi", midiLevel);
         const rendered = source.format === "mdx"
-          ? await audio().playMdx(source.source, source.pdx, loopCount, setElapsed, () => {
+          ? await audio().playMdx(source.source, source.pdx, loopCount, onProgress, () => {
+            if (!isCurrent()) return;
             setIsPlaying(false);
             setNotice("MDXのOPM／PDX再生が終了しました。");
           })
-          : await audio().playMdr(source.source, source.pdx, loopCount, setElapsed, () => {
+          : await audio().playMdr(source.source, source.pdx, loopCount, onProgress, () => {
+            if (!isCurrent()) return;
             setIsPlaying(false);
             setNotice("MDRのOPM／PDX再生が終了しました。GS MIDIは選択したSoundFontまたは外部MIDI出力へ送出されます。");
           });
+        if (!isCurrent()) return;
         setDuration(rendered.duration);
         if (source.format === "mdr") setMdrEstimatedDuration(rendered.duration);
         refreshAudioClock();
@@ -1565,18 +1690,22 @@ export default function Home() {
       setMmlError(null);
       setDuration(score.duration);
       setElapsed(0);
-      audio().setMaster(volume);
+      audio().setMaster(volumeRef.current);
       audio().setLevel("opm", opmLevel);
       audio().setLevel("pcm", pcmLevel);
       audio().setLevel("midi", midiLevel);
-      await audio().play(score, setElapsed, () => {
+      await audio().play(score, onProgress, () => {
+        if (!isCurrent()) return;
         setIsPlaying(false);
         setNotice("MMLスコアの再生が終了しました。");
       });
+      if (!isCurrent()) return;
       refreshAudioClock();
       setIsPlaying(true);
       setNotice(`${score.events.length}ノートを${score.engines.map((engine) => engine.toUpperCase()).join(" / ")}経路へ送出しています。`);
     } catch (error) {
+      if (!isCurrent()) return;
+      audio().stop();
       setIsPlaying(false);
       if (error instanceof MmlSyntaxError) {
         const message = `${error.line}行 ${error.column}列: ${error.message}`;
@@ -1587,7 +1716,7 @@ export default function Home() {
         setNotice(error instanceof Error ? error.message : typeof error === "string" ? error : fallback);
       }
     } finally {
-      setIsPreparingPlayback(false);
+      finishSourceTransition(requestId);
     }
   }
 
@@ -1606,7 +1735,7 @@ export default function Home() {
       setIsExporting(true);
       setIsPlaying(true);
       setNotice(loopCount === 0 ? `∞通常再生は書き出し時に1回・最大${exportLimit}秒へ安全に有限化します。` : `最大${exportLimit}秒・${loopCount}回指定で有限化し、MP4書き出しを開始します。`);
-      audio().setMaster(volume);
+      audio().setMaster(volumeRef.current);
       audio().setLevel("opm", opmLevel);
       audio().setLevel("pcm", pcmLevel);
       audio().setLevel("midi", midiLevel);
@@ -1677,6 +1806,8 @@ export default function Home() {
       ? "from MDR tempo command"
       : "live hardware register";
   const mdrMidiClockDeltaMs = resolveSoundFontMdrSyncResidualMs(mdrMidiSync);
+  const nextPlaylistIndex = playlistIndex === null ? null : resolveNextPlaylistIndex(playlistIndex, playlistEntries.length);
+  const nextPlaylistEntry = nextPlaylistIndex === null ? undefined : playlistEntries[nextPlaylistIndex];
 
   return (
     <div className="ui-dense compact-deck relative min-h-screen">
@@ -1689,101 +1820,44 @@ export default function Home() {
               <p className="mono m-0 mt-0.5 text-[9px] uppercase tracking-[0.21em] text-[#a9aca2]">Signal Deck / 01</p>
             </div>
           </div>
-          <div className="header-soundfont" role="group" aria-label="SoundFont bank"><span className="mono header-soundfont-label">SoundFont bank</span><HelpTooltip label="SoundFont bank">GS向けSF2/DLSをローカルから選べます。MMLの@MIDIおよびMDRのMIDIトラックに使用します。</HelpTooltip><button ref={soundFontBankButtonRef} data-testid="soundfont-bank-button" title={soundfontName} onClick={() => sf2InputRef.current?.click()} className="mt-2 flex w-full items-center justify-between border border-white/15 bg-[#11120f] p-3 text-left outline-none transition-colors hover:border-primary/70 focus:border-primary focus:ring-1 focus:ring-primary/50"><span className="mono max-w-[190px] truncate text-[10px] text-[#e4e6dc]">{soundfontName}</span><ChevronDown size={15} className="text-primary" /></button>
-<input ref={sf2InputRef} type="file" accept=".sf2,.sf3,.dls" className="hidden" onChange={selectSoundFont} /></div>
           <div className="compact-header-links flex items-center gap-4 sm:gap-6">
+            <button ref={settingsToggleRef} type="button" data-testid="settings-toggle" aria-expanded={settingsOpen} aria-controls="player-settings" onClick={() => changeSettingsOpen(!settingsOpen)} className="mono settings-toggle"><SlidersHorizontal size={15} />{settingsOpen ? "設定を隠す" : "音源・設定"}</button>
             <span className="mono hidden items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-[#a9aca2] sm:inline-flex"><span className="h-1.5 w-1.5 rounded-full bg-primary" />Browser local</span>
             <button type="button" data-testid="format-guide-button" onClick={() => setFormatGuideOpen(true)} className="mono flex items-center gap-1.5 text-[10px] uppercase tracking-[0.16em] text-[#d7d9d1] transition-colors hover:text-primary"><Info size={13} />Format guide</button>
           </div>
         </div>
       </header>
-      <main className="compact-main program-workspace">
-        <div className="compact-column program-source">
-          <CompactPanel id="source" title="音源 / Source" defaultOpen summary={mode === "local" ? fileName ?? "Local file" : mode === "remote" ? "Remote URL" : "MML"}>
-              <div className="flex overflow-x-auto border-b border-white/10">
-                    {([
-                      ["local", "LOCAL FILE", FolderOpen],
-                      ["remote", "REMOTE URL", CloudDownload],
-                      ["mml", "MML SCORE", KeyboardMusic],
-                    ] as const).map(([id, label, Icon]) => <button key={id} aria-label={label} onClick={() => setMode(id)} className={`mono flex shrink-0 items-center gap-2 border-b-2 px-3 py-3 text-[10px] font-medium tracking-[0.12em] transition-colors ${mode === id ? "border-primary text-primary" : "border-transparent text-[#a9aca2] hover:text-[#f5f4ec]"}`}><Icon size={14} />{id === "local" ? "FILE" : id === "remote" ? "URL" : "MML"}</button>)}
-                  </div>
-              {mode === "mml" && <div className="pt-5">
-                    <div className="flex items-center justify-between"><SmallLabel help={<>T, O, L, V, A–G, R, &lt;, &gt;, +, -, #、@OPM / @PCM / @MIDI に対応します。</>}>MML editor / channel 01</SmallLabel><span className="mono text-[10px] text-[#a9aca2]">{mml.length} chars</span></div>
-                    <textarea value={mml} onChange={(event) => setMml(event.target.value)} spellCheck={false} className="mono mt-3 min-h-[176px] w-full resize-y border border-white/15 bg-[#11120f] p-4 text-sm leading-7 text-[#dfe1d8] outline-none transition-colors placeholder:text-[#6c7167] focus:border-primary" aria-label="MMLを入力" />
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3"><button onClick={() => { setMml(defaultMml); setMmlError(null); }} className="mono inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-[#d8ff3e] hover:underline"><RotateCcw size={12} />Restore sample</button></div>
-                    {mmlError && <p className="mono mt-3 border-l-2 border-[#ff746c] bg-[#ff746c]/10 px-3 py-2 text-[10px] leading-5 text-[#ffd6d2]">{mmlError}</p>}
-                  </div>}
-              {mode === "local" && <div className="compact-source-form"><div onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={onDrop} onClick={() => sourceInputRef.current?.click()} role="button" tabIndex={0} aria-label="音源ファイルを選択" onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); sourceInputRef.current?.click(); } }} className={`compact-dropzone grid place-items-center border border-dashed p-5 text-center transition-colors ${isDragging ? "border-primary bg-primary/[0.07]" : "border-white/20 bg-[#11120f] hover:border-primary/60"}`}>
-                      <div><div className="mx-auto grid h-12 w-12 place-items-center border border-primary/60 text-primary"><Upload size={20} /></div><p className="display mb-0 mt-5 text-xl font-semibold tracking-[-0.04em] text-[#f5f4ec]">{fileName ?? "MDR / MDX / PDXを置く"}</p></div>
-                    </div>
-<input ref={sourceInputRef} type="file" multiple accept=".mdr,.mdx,.pdx,application/octet-stream" className="hidden" onChange={selectSource} />
-<input ref={folderInputRef} type="file" multiple {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} className="hidden" onChange={selectFolder} />
-<div className="mt-3 flex flex-wrap items-center gap-3"><HelpTooltip label="音源ファイルの選択">クリックしてファイルを選択、またはここへドラッグ。MDR／MDXとPDXは同時選択、または後から追加できます。</HelpTooltip><button onClick={() => folderInputRef.current?.click()} className="mono shrink-0 border border-primary/45 bg-primary/[0.045] px-3 py-2 text-[9px] uppercase tracking-[0.08em] text-primary transition-colors hover:bg-primary hover:text-primary-foreground">Folder / playlist</button></div></div>}
-              {mode === "remote" && <div className="compact-source-form"><div><div className="flex items-center justify-between gap-3"><SmallLabel help={<>通常URLはCORS応答が必要です。Google Drive／Dropboxの<strong>公開共有リンク</strong>は、このサービスの許可済み取得経路で読み込むためブラウザ側CORSに依存しません。ログイン必須・閲覧制限・ダウンロード禁止のファイルは取得しません。</>}>Remote MDR / MDX URL</SmallLabel>{isCloudShareLink(remoteMdr) && <span className="mono text-[9px] uppercase tracking-[0.09em] text-primary">Share proxy ready</span>}</div><input value={remoteMdr} onChange={(event) => setRemoteMdr(event.target.value)} placeholder="https://storage.example/song.mdr または song.mdx／Drive・Dropbox共有リンク" className="mono mt-2 w-full border border-white/15 bg-[#11120f] px-3 py-3 text-xs text-[#f5f4ec] outline-none placeholder:text-[#62675d] focus:border-primary" /></div>
-<div><div className="flex items-center justify-between gap-3"><SmallLabel>Companion PDX URL / optional</SmallLabel>{isCloudShareLink(remotePdx) && <span className="mono text-[9px] uppercase tracking-[0.09em] text-primary">Share proxy ready</span>}</div><input value={remotePdx} onChange={(event) => setRemotePdx(event.target.value)} placeholder="https://storage.example/song.pdx または Drive／Dropbox共有リンク" className="mono mt-2 w-full border border-white/15 bg-[#11120f] px-3 py-3 text-xs text-[#f5f4ec] outline-none placeholder:text-[#62675d] focus:border-primary" /></div>
-<div className="flex items-center gap-2"><Button onClick={loadRemote} disabled={remoteLoading} className="h-9 rounded-none bg-primary px-3 text-[10px] font-semibold text-primary-foreground hover:bg-[#e5ff76]">{remoteLoading ? <LoaderCircle size={14} className="animate-spin" /> : <CloudDownload size={14} />}{remoteLoading ? "Loading" : "Load source"}</Button></div>
-<CompactPanel id="catalog" title="リモートカタログ" summary={`${catalogEntries.length} 曲`}><div className="flex items-center justify-between"><SmallLabel help={<>配列または<code>entries</code> / <code>tracks</code> / <code>songs</code>配列を受け付けます。これをリモートフォルダ用マニフェストとして扱い、各項目は<code>mdrUrl</code>（MDXも可）と任意の<code>pdxUrl</code>を指定します。Google Drive／Dropboxは<strong>公開共有JSONファイル</strong>を指定してください。フォルダのHTML一覧は取得しません。</>}>Remote catalog / JSON</SmallLabel><span className={`mono text-[9px] ${catalogIsDriveLink ? "text-primary" : "text-[#a9aca2]"}`}>{catalogIsDriveLink ? "DRIVE DETECTED" : "CORS REQUIRED"}</span></div>
-<div className="mt-3 grid gap-2 sm:grid-cols-[190px_1fr_auto]"><select value={catalogSourcePreset} onChange={(event) => { const preset = event.target.value as "cors" | "google-drive" | "dropbox" | "signal-deck-demo"; setCatalogSourcePreset(preset); if (preset === "signal-deck-demo") { setCatalogUrl(signalDeckDemoCatalogUrl); setNotice("Signal DeckのCORS検証済み診断カタログをセットしました。LOAD CATALOGで最小MDRを読み込めます。"); } else if (preset !== "cors") setNotice(`${preset === "google-drive" ? "Google Drive" : "Dropbox"}共有JSONを選択しました。公開共有ファイルのリンクを貼り付けてLOADを押してください。`); }} className="mono border border-white/15 bg-[#11120f] px-3 py-2.5 text-[10px] text-[#dfe1d8] outline-none focus:border-primary"><option value="cors">Custom CORS JSON</option><option value="signal-deck-demo">Signal Deck diagnostic catalog</option><option value="google-drive">Google Drive shared JSON</option><option value="dropbox">Dropbox shared JSON</option></select><input value={catalogUrl} onChange={(event) => setCatalogUrl(event.target.value)} placeholder={catalogSourcePreset === "signal-deck-demo" ? signalDeckDemoCatalogUrl : catalogSourcePreset === "google-drive" ? "https://drive.google.com/file/d/FILE_ID/view" : catalogSourcePreset === "dropbox" ? "https://www.dropbox.com/scl/fi/.../catalog.json" : "https://storage.example/madrv-catalog.json"} className="mono min-w-0 border border-white/15 bg-[#11120f] px-3 py-2.5 text-[10px] text-[#f5f4ec] outline-none placeholder:text-[#62675d] focus:border-primary" /><button onClick={loadCatalog} disabled={remoteLoading} className="mono border border-white/25 px-3 py-2 text-[9px] uppercase tracking-[0.08em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">Load catalog</button></div>
-{(catalogEntries.length > 0 || favoriteEntries.length > 0) && <div className="mt-3">
-                        <input value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="タイトル、作者、タグを検索" className="mono w-full border border-white/10 bg-[#11120f] px-3 py-2 text-[10px] text-[#f5f4ec] outline-none placeholder:text-[#62675d] focus:border-primary" />
-                        <div className="mt-2 max-h-52 overflow-y-auto border border-white/10 bg-[#11120f]">
-                          {filteredCatalogEntries.slice(0, 24).map((entry) => { const favorite = favoriteEntries.some((item) => item.id === entry.id); return <div key={entry.id} className="grid grid-cols-[1fr_auto] gap-2 border-b border-white/5 px-3 py-2 last:border-b-0"><button onClick={() => { setPlaylistIndex(playlistEntries.findIndex((candidate) => candidate.id === `remote:${entry.id}`)); playlistRunRef.current = false; void loadRemoteEntry(entry.mdrUrl, entry.pdxUrl, entry.title); }} className="min-w-0 text-left"><span className="mono block truncate text-[10px] text-[#f5f4ec] hover:text-primary">{entry.title}</span><span className="mono block truncate pt-1 text-[8px] text-[#a9aca2]">{[entry.artist, ...entry.tags].filter(Boolean).join(" · ") || entry.mdrUrl}</span></button><button onClick={() => toggleCatalogFavorite(entry)} className={`mono self-center border px-2 py-1 text-[9px] ${favorite ? "border-primary bg-primary text-primary-foreground" : "border-white/20 text-[#a9aca2] hover:border-primary hover:text-primary"}`}>{favorite ? "★" : "☆"}</button></div>; })}
-                          {!filteredCatalogEntries.length && favoriteEntries.length > 0 && favoriteEntries.filter((entry) => [entry.title, entry.artist ?? "", ...entry.tags].join(" ").toLowerCase().includes(catalogQuery.trim().toLowerCase())).map((entry) => <div key={`favorite-${entry.id}`} className="grid grid-cols-[1fr_auto] gap-2 border-b border-white/5 px-3 py-2 last:border-b-0"><button onClick={() => { setPlaylistIndex(playlistEntries.findIndex((candidate) => candidate.id === `remote:${entry.id}`)); playlistRunRef.current = false; void loadRemoteEntry(entry.mdrUrl, entry.pdxUrl, entry.title); }} className="min-w-0 text-left"><span className="mono block truncate text-[10px] text-primary">★ {entry.title}</span><span className="mono block truncate pt-1 text-[8px] text-[#a9aca2]">{entry.artist ?? entry.mdrUrl}</span></button><button onClick={() => toggleCatalogFavorite(entry)} className="mono self-center border border-white/20 px-2 py-1 text-[9px] text-[#a9aca2] hover:border-primary hover:text-primary">☆</button></div>)}
-                          {!filteredCatalogEntries.length && !favoriteEntries.length && <p className="mono m-0 px-3 py-3 text-[9px] text-[#72776d]">該当する曲なし</p>}
-                        </div>
-                      </div>}
-</CompactPanel></div>}
-            </CompactPanel>
-          <CompactPanel id="playlist" defaultOpen title="プレイリスト" summary={`${playlistEntries.length} 曲`}><div className="compact-playlist" aria-label="プレイリスト" data-testid="saved-playlist">
-                      <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><ListMusic size={15} className="text-primary" /><div><SmallLabel help={<>曲別のループ回数で連続再生し、10秒以下の曲は開始から11秒になるまで無音を入れます。最後の曲で停止します。ローカル曲は同一セッション内のみ（再読込後はリモート曲だけ保存）。<br /><br />ローカルまたはリモートの音源を読み込んで、Add currentでプレイリストへ登録できます。リモートカタログやフォルダ選択で読み込んだ曲も追加されます。</>}>Saved playlist</SmallLabel></div></div><div className="flex flex-wrap gap-1.5"><button onClick={addCurrentSourceToPlaylist} disabled={mode === "mml"} className="mono border border-white/25 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">Add current</button><button onClick={() => playAdjacentPlaylistEntry(-1)} disabled={!playlistEntries.length || playlistIndex === null} className="mono border border-white/20 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-35">Prev</button><button onClick={() => playAdjacentPlaylistEntry(1)} disabled={!playlistEntries.length || playlistIndex === null} className="mono border border-white/20 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-35">Next</button><button onClick={clearPlaylist} disabled={!playlistEntries.length} className="mono border border-[#ff9b94]/35 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#ffb8b2] transition-colors hover:bg-[#ff9b94]/10 disabled:opacity-35">Clear</button><button onClick={() => { const selectedEntry = playlistIndex === null ? undefined : playlistEntries[playlistIndex]; if (selectedEntry) { playlistRunRef.current = true; void playPlaylistEntry(selectedEntry.id); } }} disabled={playlistIndex === null || isPlaying} className="mono border border-primary/55 px-3 py-2 text-[9px] uppercase tracking-[0.08em] text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:opacity-35">Play selected</button></div></div>
-                    {playlistEntries.length > 0 && <div className="mt-3 max-h-64 overflow-y-auto border border-white/10 bg-[#11120f]">
-                      {playlistEntries.map((entry, index) => { const pdxMissing = entry.format === "mdx" && Boolean(entry.requiredPdxName) && !entry.pdx; const selected = index === playlistIndex; const entryLoops = normalizePlaylistLoopCount(entry.loopCount ?? DEFAULT_PLAYLIST_LOOP_COUNT); return <div key={entry.id} draggable onDragStart={(event) => { setPlaylistDragIndex(index); event.dataTransfer.effectAllowed = "move"; }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (playlistDragIndex !== null) moveEntryInPlaylist(playlistDragIndex, index); setPlaylistDragIndex(null); }} onDragEnd={() => setPlaylistDragIndex(null)} className={`compact-playlist-entry grid grid-cols-[auto_1fr_auto] gap-2 border-b border-white/5 px-3 py-2 last:border-b-0 ${selected ? "bg-primary/[0.08]" : "hover:bg-white/[0.035]"}`}><span className={`mono cursor-grab pt-1 text-[9px] ${selected ? "text-primary" : "text-[#8b9085]"}`}>{String(index + 1).padStart(2, "0")}</span><button type="button" data-testid={`playlist-entry-${index}`} data-playlist-entry-id={entry.id} onClick={() => { playlistRunRef.current = true; void playPlaylistEntry(entry.id); }} className="min-w-0 text-left"><span data-testid={`playlist-entry-title-${index}`} className="mono block truncate text-[10px] text-[#f5f4ec]">{entry.title}</span><span data-testid={`playlist-entry-path-${index}`} className="mono block truncate pt-0.5 text-[8px] text-[#8b9085]">{entry.origin.toUpperCase()} · {entry.format.toUpperCase()} · {entry.path ?? "remote URL"}</span></button><div className="flex items-center gap-1"><label className="mono flex items-center gap-1 text-[8px] text-[#a9aca2]">×<input aria-label={`${entry.title}のループ回数`} type="number" min={1} max={99} value={entryLoops} onChange={(event) => updatePlaylistEntryLoops(entry.id, Number(event.target.value))} className="mono w-9 border border-white/15 bg-black/20 px-1 py-1 text-center text-[9px] text-[#f5f4ec] outline-none focus:border-primary" /></label><button type="button" aria-label={`${entry.title}を上へ移動`} disabled={index === 0} onClick={() => moveEntryInPlaylist(index, index - 1)} className="mono border border-white/15 px-1.5 py-1 text-[8px] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-25">↑</button><button type="button" aria-label={`${entry.title}を下へ移動`} disabled={index === playlistEntries.length - 1} onClick={() => moveEntryInPlaylist(index, index + 1)} className="mono border border-white/15 px-1.5 py-1 text-[8px] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-25">↓</button><button type="button" aria-label={`${entry.title}をプレイリストから削除`} onClick={() => removeEntryFromPlaylist(entry.id)} className="mono border border-[#ff9b94]/35 px-1.5 py-1 text-[8px] text-[#ffb8b2] hover:bg-[#ff9b94]/10">×</button><span className={`mono self-center text-[8px] uppercase tracking-[0.08em] ${pdxMissing ? "text-[#ff9b94]" : selected && isPlaying ? "text-primary" : "text-[#a9aca2]"}`}>{pdxMissing ? "PDX missing" : selected && isPlaying ? "playing" : "ready"}</span></div></div>; })}
-                    </div>}
-
-                  </div></CompactPanel>
-          {recentSources.length > 0 && <CompactPanel id="recent" title="最近の音源" summary={`${recentSources.length} 件`}>{recentSources.length > 0 && <div aria-label="最近使用した音源" data-testid="recent-sources" className="mt-4 border border-white/10 bg-[#11120f] p-3">
-                    <div className="flex items-center justify-between gap-3"><SmallLabel help={<>公開URLのみワンクリック再読込。ローカルファイルはブラウザ制約で履歴に残せません。</>}>Recent sources / remote URLs</SmallLabel><button type="button" onClick={clearSourceHistory} className="mono text-[8px] uppercase tracking-[0.08em] text-[#a9aca2] hover:text-primary">Clear</button></div>
-
-                    <div className="mt-2 divide-y divide-white/10">{recentSources.map((source) => <div key={source.id} className="flex items-center gap-2 py-2 first:pt-0 last:pb-0"><button type="button" onClick={() => reopenRecentSource(source)} className="min-w-0 flex-1 text-left"><span className="mono block truncate text-[10px] text-[#f5f4ec] hover:text-primary">{source.label}</span><span className="mono block truncate pt-0.5 text-[8px] uppercase tracking-[0.08em] text-[#8b9085]">Remote · reload · {source.format?.toUpperCase() ?? "MADRV"}{source.pdxName ? ` · ${source.pdxName}` : ""}</span></button><button type="button" aria-label={`履歴から${source.label}を削除`} onClick={() => removeSourceHistory(source.id)} className="mono shrink-0 border border-white/15 px-2 py-1 text-[8px] text-[#a9aca2] hover:border-[#ff9b94] hover:text-[#ffb8b2]">×</button></div>)}</div>
-                  </div>}</CompactPanel>}
-          {(mdrInfo || localMdxInfo) && <CompactPanel id="source-info" title="音源情報 / PDX" summary={mdrInfo ? `${mdrInfo.activeTracks} tracks` : "MDX"}>
-              {mode === "local" && <>{localSourceFormat === "mdx" && localMdxInfo && <div className="mt-4 border border-primary/30 bg-primary/[0.045] p-4">
-                      <div className="flex items-center justify-between gap-3"><SmallLabel help={<>MDXとPDXを同時に選ぶか、必要なPDXを後から追加すると、同名ファイルを自動選択します。</>}>MDX link analysis</SmallLabel><span className={`mono text-[9px] uppercase tracking-[0.1em] ${localPdx ? "text-primary" : "text-[#ffb8b2]"}`}>{localPdx ? "PDX READY" : localMdxPdxName ? "PDX REQUIRED" : "PDX NOT REQUIRED"}</span></div>
-                      <dl className="mt-3 grid gap-x-4 gap-y-3 sm:grid-cols-2">
-                        <div><dt className="mono text-[9px] uppercase tracking-[0.12em] text-[#a9aca2]">MDX title</dt><dd className="mono mt-1 break-words text-xs text-[#f5f4ec]">{localMdxInfo.title}</dd></div>
-                        <div><dt className="mono text-[9px] uppercase tracking-[0.12em] text-[#a9aca2]">Required PDX</dt><dd className="mono mt-1 break-words text-xs text-[#f5f4ec]">{localMdxPdxName ? formatPdxFileName(localMdxPdxName) : "Not required"}</dd></div>
-                        <div><dt className="mono text-[9px] uppercase tracking-[0.12em] text-[#a9aca2]">Linked PDX</dt><dd className="mono mt-1 break-words text-xs text-[#f5f4ec]">{localPdxFileName || "Not selected"}</dd></div>
-                        <div><dt className="mono text-[9px] uppercase tracking-[0.12em] text-[#a9aca2]">Link method</dt><dd className="mono mt-1 text-xs text-[#f5f4ec]">{localPdx ? (localPdxAutoMatched ? "Auto-matched" : "Selected") : "Awaiting PDX"}</dd></div>
-                        <div><dt className="mono text-[9px] uppercase tracking-[0.12em] text-[#a9aca2]">PCM activity</dt><dd className={`mono mt-1 text-xs ${pcmActivityMask > 0 ? "text-primary" : "text-[#a9aca2]"}`}>{pcmActivityMask > 0 ? `Active · ch ${Array.from({ length: 8 }, (_, channel) => channel + 1).filter((channel) => (pcmActivityMask & (1 << (channel - 1))) !== 0).join(", ")}` : "Awaiting PCM activity"}</dd></div>
-                        <div><dt className="mono text-[9px] uppercase tracking-[0.12em] text-[#a9aca2]">Engine output</dt><dd className={`mono mt-1 text-xs ${mixOutputPeak > 0 ? "text-primary" : "text-[#a9aca2]"}`}>{mixOutputPeak > 0 ? `Non-zero · peak ${mixOutputPeak}` : "Awaiting playback"}</dd></div>
-                      </dl>
-                      <p className="mono mt-3 border-t border-white/10 pt-3 text-[9px] leading-5 text-[#a9aca2]">PDX候補: {localPdxCandidates.length ? localPdxCandidates.map((candidate) => candidate.name).join(" · ") : "なし"}</p>
-                    </div>}
-{localSourceFormat === "mdr" && mdrInfo && <MdrMetadataPanel info={mdrInfo} linkedPdxName={localPdxFileName} sourceLabel="Local MDR" estimatedDuration={mdrEstimatedDuration} />}</>}
-              {mode === "remote" && mdrInfo && <MdrMetadataPanel info={mdrInfo} linkedPdxName={remotePdx} sourceLabel="Remote MDR" estimatedDuration={mdrEstimatedDuration} />}
-            </CompactPanel>}
-          <CompactPanel id="share" defaultOpen title="セッション共有" summary="Short link"><div className="compact-share-actions flex items-center gap-1"><HelpTooltip label="セッション共有">公開MDR／PDX／SoundFont URL、MML、ループ上限を短い共有IDで復元します。音声・ローカルファイル・外部MIDI機器・診断ログは共有しません。既存の長い共有URLも引き続き開けます。</HelpTooltip><Button onClick={copySessionLink} disabled={sharedSessionCreate.isPending} variant="outline" className="h-10 shrink-0 rounded-none border-primary/50 px-3 text-[10px] font-medium uppercase tracking-[0.08em] text-primary hover:bg-primary/10"><Share2 size={14} />{sharedSessionCreate.isPending ? "Creating" : "Copy short link"}</Button></div>
-{sessionLink && <input value={sessionLink} readOnly onFocus={(event) => event.currentTarget.select()} aria-label="共有セッションリンク" className="mono mt-3 w-full border border-white/15 bg-[#11120f] px-3 py-2 text-[9px] text-[#dfe1d8] outline-none focus:border-primary" />}</CompactPanel>
-          <CompactPanel id="export" defaultOpen title="動画書き出し" summary="MP4 / WebM"><div className="compact-export"><label className="block"><SmallLabel>最大秒数</SmallLabel><input type="number" min="10" max="600" value={exportLimit} onChange={(event) => setExportLimit(Math.max(10, Math.min(600, Number(event.target.value) || 60)))} className="mono mt-2 w-full border border-white/15 bg-[#11120f] px-3 py-2 text-xs text-[#f5f4ec] outline-none focus:border-primary" /></label>
-<div className="flex items-center gap-1 self-end"><HelpTooltip label="動画書き出し">∞設定でも書き出しは1回・最大秒数に制限されます。</HelpTooltip><Button onClick={exportMml} disabled={isExporting} className="self-end rounded-none bg-[#e4e6dc] px-4 py-5 text-[10px] font-bold uppercase tracking-[0.1em] text-[#11120f] hover:bg-primary">{isExporting ? <LoaderCircle size={15} className="animate-spin" /> : <FileAudio size={15} />}{isExporting ? "Rendering" : "Export MP4"}</Button></div></div></CompactPanel>
-        </div>
+      <main className={`compact-main program-workspace${settingsOpen ? " settings-open" : ""}`}>
         <section className="program-deck primary-deck" aria-label="Program Deck" data-testid="program-deck">
         <section className="compact-transport" aria-label="再生コントロール">
-          <span className="mono program-deck-label">Program Deck</span><div className="compact-title-row"><h1 data-testid="source-title" title={sourceTitle}>{sourceTitle}</h1><span className="mono compact-clock">{formatTime(elapsed)} / {duration ? formatTime(duration) : "--:--.---"}</span><span className="mono compact-tempo">{estimatedBpm ? `${estimatedBpm.toFixed(1)} BPM` : "— BPM"}</span></div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="mono program-deck-label">Program Deck</span>
+            <span data-testid="playback-state" role="status" className="mono inline-flex items-center gap-1.5 text-[11px] text-primary">{playbackLoading && <LoaderCircle size={12} className="animate-spin" />}{playbackLoading ? "LOADING" : isPlaying ? "PLAYING" : "READY"}</span>
+          </div><div className="compact-title-row"><h1 data-testid="source-title" title={loadingSource?.title ?? sourceTitle}>{loadingSource?.title ?? sourceTitle}</h1><span className="mono compact-clock">{formatTime(elapsed)} / {duration ? formatTime(duration) : "--:--.---"}</span><span className="mono compact-tempo">{estimatedBpm ? `${estimatedBpm.toFixed(1)} BPM` : "— BPM"}</span></div>
           <div data-testid="primary-transport-controls" className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 border-b border-white/10 pb-3 sm:gap-3 sm:pb-4">
                   <div className="flex items-center gap-2">
-                    <Button onClick={togglePlayback} size="icon" className="h-11 w-11 rounded-none bg-primary text-primary-foreground shadow-[3px_3px_0_0_rgba(216,255,62,0.16)] transition-transform active:scale-95 hover:bg-[#e5ff76] sm:h-12 sm:w-12" aria-label={isPlaying || isPreparingPlayback ? "停止" : "再生"}>{isPlaying ? <CircleStop size={20} /> : isPreparingPlayback ? <LoaderCircle size={20} className="animate-spin" /> : <Play size={20} fill="currentColor" />}</Button>
-                    <Button onClick={() => { playlistStartRequestRef.current += 1; playlistRunRef.current = false; audio().stop(); setIsPlaying(false); setElapsed(0); setNotice("再生を停止しました。"); }} variant="outline" className="h-11 rounded-none border-white/20 px-3 text-[#f5f4ec] hover:border-primary hover:bg-primary/5 hover:text-primary sm:h-12 sm:px-4"><CircleStop size={16} />停止</Button>
+                    <Button onClick={togglePlayback} size="icon" className="h-11 w-11 rounded-none bg-primary text-primary-foreground shadow-[3px_3px_0_0_rgba(216,255,62,0.16)] transition-transform active:scale-95 hover:bg-[#e5ff76] sm:h-12 sm:w-12" aria-label={playbackLoading ? "読み込みを中止" : isPlaying ? "停止" : "再生"}>{playbackLoading ? <LoaderCircle size={20} className="animate-spin" /> : isPlaying ? <CircleStop size={20} /> : <Play size={20} fill="currentColor" />}</Button>
+                    <Button onClick={stopPlayback} variant="outline" className="h-11 rounded-none border-white/20 px-3 text-[#f5f4ec] hover:border-primary hover:bg-primary/5 hover:text-primary sm:h-12 sm:px-4"><CircleStop size={16} />停止</Button>
                     <Button onClick={() => setMml(defaultMml)} variant="ghost" className="h-11 rounded-none px-2 text-[#a9aca2] hover:text-primary sm:h-12 sm:px-3" aria-label="MMLを初期状態に戻す"><RotateCcw size={16} /></Button>
                   </div>
-                  <div className="flex min-w-0 items-center gap-1 sm:ml-auto sm:w-full sm:max-w-[420px] sm:gap-3"><Volume2 size={15} className="shrink-0 text-primary sm:h-[17px] sm:w-[17px]" /><input type="range" min="0" max="100" value={volume} onChange={(event) => { const value = Number(event.target.value); setVolume(value); audio().setMaster(value); }} className="range-control min-w-0" aria-label="マスター音量" /><span className="mono w-6 shrink-0 text-right text-[10px] text-[#dfe1d8] sm:w-8 sm:text-[11px]">{volume}</span></div><div className="compact-loop mono"><label htmlFor="playback-loop-count">Loop</label><input id="playback-loop-count" type="number" min="1" max="99" disabled={loopCount === 0} value={loopCount === 0 ? "" : loopCount} placeholder="∞" onChange={(event) => setLoopCount(Math.max(1, Math.min(99, Number(event.target.value) || 1)))} aria-label="ループ回数" /><button type="button" aria-label="無限ループを切り替える" aria-pressed={loopCount === 0} onClick={() => setLoopCount(current => current === 0 ? 1 : 0)}>∞</button></div></div>
+                  <div className="flex min-w-0 items-center gap-1 sm:ml-auto sm:w-full sm:max-w-[420px] sm:gap-3"><Volume2 size={15} className="shrink-0 text-primary sm:h-[17px] sm:w-[17px]" /><input type="range" min="0" max="100" value={volume} onChange={(event) => { const value = Number(event.target.value); setVolume(value); volumeRef.current = value; audio().setMaster(value); }} className="range-control min-w-0" aria-label="マスター音量" /><span className="mono w-6 shrink-0 text-right text-[10px] text-[#dfe1d8] sm:w-8 sm:text-[11px]">{volume}</span></div><div className="compact-loop mono"><label htmlFor="playback-loop-count">Loop</label><input id="playback-loop-count" type="number" min="1" max="99" disabled={loopCount === 0} value={loopCount === 0 ? "" : loopCount} placeholder="∞" onChange={(event) => setLoopCount(Math.max(1, Math.min(99, Number(event.target.value) || 1)))} aria-label="ループ回数" /><button type="button" aria-label="無限ループを切り替える" aria-pressed={loopCount === 0} onClick={() => setLoopCount(current => current === 0 ? 1 : 0)}>∞</button></div></div>
+          <div className="deck-levels" role="group" aria-label="出力レベル"><span className="mono program-deck-label">出力レベル</span>
+              <div className="compact-levels">{engineRows.map(engine => { const [level, setLevel] = activeLevels[engine.id]; return <label key={engine.id} className="compact-level"><span className="mono">{engine.label}</span><EngineStatus active={isEngineActive(engine.id)} /><input type="range" min="0" max="100" value={level} onChange={event => { const value = Number(event.target.value); if (engine.id === "opm") { setOpmLevel(value); setPcmLevel(value); audio().setLevel("opm", value); audio().setLevel("pcm", value); } else { setLevel(value); audio().setLevel("midi", value); } }} className="range-control" aria-label={`${engine.label}の出力レベル`} /><span className="mono">{level}%</span></label>; })}</div>
+</div>
           <div className="signal-window calibrated-rules relative h-[52px] overflow-hidden border-y border-white/10 bg-[#11120f]" role="progressbar" aria-label="再生位置" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(transportProgress)}>
                   <div className="absolute inset-0 opacity-50" style={{ backgroundImage: "repeating-linear-gradient(90deg, rgba(245,244,236,.14) 0 1px, transparent 1px 40px)" }} />
                   <div className="absolute inset-x-3 bottom-3 h-[2px] bg-white/15"><div className="h-full bg-primary/60" style={{ width: `${transportProgress}%`, transition: isMobile ? "width 200ms linear" : undefined }} /></div>
                   <div className="absolute inset-x-3 top-2 flex items-center justify-between"><span className="mono text-[9px] uppercase tracking-[0.16em] text-[#a9aca2]">Playback position</span><span data-testid="playback-position" className="mono text-[10px] text-primary">{transportProgress.toFixed(1)}%</span></div>
                   <div className="absolute inset-x-3 inset-y-0 will-change-transform" data-testid="playback-marker" style={{ transform: `translate3d(${transportProgress}%, 0, 0)`, transition: isMobile ? "transform 200ms linear" : undefined }}><div className="absolute -left-[4px] bottom-[7px] h-2.5 w-2.5 rotate-45 border border-primary bg-[#11120f] shadow-[0_0_12px_2px_rgba(216,255,62,.16)]" /></div>
                 </div>
-          <p data-testid="playback-notice" role="status" className="mono m-0 border-l-2 border-primary/60 bg-primary/[0.045] px-3 py-2 text-[10px] leading-5 text-[#dfe1d8]">{notice}</p>
+          <div className="flex flex-wrap items-center gap-2 border-l-2 border-primary/60 bg-primary/[0.045] pr-2">
+            <p data-testid="playback-notice" role="status" className="mono m-0 min-w-0 flex-[1_1_240px] px-3 py-2 text-[10px] leading-5 text-[#dfe1d8]">{loadingSource ? `LOADING — 「${loadingSource.title}」を読み込んでいます。停止で中止できます。` : notice}</p>
+            <div role="group" aria-label="再生状況の曲送り" className="flex shrink-0 gap-1.5 py-1 pl-2">
+              <button type="button" aria-label="Prev：前の曲を再生" onClick={() => playAdjacentPlaylistEntry(-1)} disabled={!playlistEntries.length || playlistIndex === null} className="mono min-h-8 border border-white/25 px-3 text-[10px] uppercase tracking-[0.07em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">Prev</button>
+              <button type="button" aria-label="Next：次の曲を再生" onClick={() => playAdjacentPlaylistEntry(1)} disabled={!playlistEntries.length || playlistIndex === null} className="mono min-h-8 border border-white/25 px-3 text-[10px] uppercase tracking-[0.07em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">Next</button>
+            </div>
+          </div>
+          {playlistRunRef.current && playlistIndex !== null && playlistIndex >= 0 && <p data-testid="playlist-up-next" className="deck-up-next mono"><span>Next</span>{nextPlaylistEntry ? <><span className="deck-next-position">{nextPlaylistIndex! + 1} / {playlistEntries.length}</span><span className="deck-next-title" title={nextPlaylistEntry.title}>{nextPlaylistEntry.title}</span></> : <span className="deck-next-title">最後の曲です · 再生後に停止</span>}</p>}
         </section>
           <CompactPanel id="matrix" defaultOpen title="鍵盤 / Track matrix" summary={`${activeMixerTracks.length} tracks · ${mutedTracks.length} muted`}><div className="compact-matrix"><span className="sr-only">トラックごとにミュートとソロを切り替えられます。</span><div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1"><SmallLabel help={<>C0–B7 · OPM / MIDI · PCM mute</>}>Track matrix / MDR & MDX mixer</SmallLabel></div>
@@ -1837,10 +1911,128 @@ export default function Home() {
                   })}
                 </div>
               )}</div></CompactPanel>
-          {activeMixerTracks.length > 0 && <CompactPanel id="activity" title="トラック発音状況" summary={`${activeMixerTracks.length} tracks`}><div data-testid="track-key-overview"><ChannelNoteState tracks={activeMixerTracks} trackKeyState={trackKeyState} mutedTracks={mutedTracks} pcmActivityMask={pcmActivityMask} /></div></CompactPanel>}
+          <CompactPanel id="playlist" defaultOpen title="プレイリスト" summary={`${playlistEntries.length} 曲`}><div className="compact-playlist" aria-label="プレイリスト" data-testid="saved-playlist">
+                      <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><ListMusic size={15} className="text-primary" /><div><SmallLabel help={<>曲別のループ回数で連続再生し、10秒以下の曲は開始から11秒になるまで無音を入れます。最後の曲で停止します。ローカル曲は同一セッション内のみ（再読込後はリモート曲だけ保存）。<br /><br />ローカルまたはリモートの音源を読み込んで、Add currentでプレイリストへ登録できます。リモートカタログやフォルダ選択で読み込んだ曲も追加されます。</>}>Saved playlist</SmallLabel></div></div><div className="flex flex-wrap gap-1.5"><button onClick={addCurrentSourceToPlaylist} disabled={mode === "mml"} className="mono border border-white/25 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">Add current</button><button onClick={() => playAdjacentPlaylistEntry(-1)} disabled={!playlistEntries.length || playlistIndex === null} className="mono border border-white/20 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-35">Prev</button><button onClick={() => playAdjacentPlaylistEntry(1)} disabled={!playlistEntries.length || playlistIndex === null} className="mono border border-white/20 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-35">Next</button><button onClick={clearPlaylist} disabled={!playlistEntries.length} className="mono border border-[#ff9b94]/35 px-2.5 py-2 text-[8px] uppercase tracking-[0.07em] text-[#ffb8b2] transition-colors hover:bg-[#ff9b94]/10 disabled:opacity-35">Clear</button><button onClick={() => { const selectedEntry = playlistIndex === null ? undefined : playlistEntries[playlistIndex]; if (selectedEntry) { playlistRunRef.current = true; void playPlaylistEntry(selectedEntry.id); } }} disabled={playlistIndex === null || isPlaying || playbackLoading} className="mono border border-primary/55 px-3 py-2 text-[9px] uppercase tracking-[0.08em] text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:opacity-35">Play selected</button></div></div>
+                    {!playlistEntries.length && <div className="playlist-empty"><p>曲を追加して、ここから連続再生。</p><button type="button" onClick={() => changeSettingsOpen(true)} className="mono settings-toggle"><FolderOpen size={15} />音源・カタログを開く</button></div>}
+                    {playlistEntries.length > 0 && <div className="mt-3 max-h-64 overflow-y-auto border border-white/10 bg-[#11120f]">
+                      {playlistEntries.map((entry, index) => { const pdxMissing = entry.format === "mdx" && Boolean(entry.requiredPdxName) && !entry.pdx; const selected = index === playlistIndex; const loading = loadingSource?.entryId === entry.id; const playing = playingPlaylistEntryId === entry.id && isPlaying; const entryLoops = normalizePlaylistLoopCount(entry.loopCount ?? DEFAULT_PLAYLIST_LOOP_COUNT); return <div key={entry.id} draggable onDragStart={(event) => { setPlaylistDragIndex(index); event.dataTransfer.effectAllowed = "move"; }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (playlistDragIndex !== null) moveEntryInPlaylist(playlistDragIndex, index); setPlaylistDragIndex(null); }} onDragEnd={() => setPlaylistDragIndex(null)} className={`compact-playlist-entry grid grid-cols-[auto_1fr_auto] gap-2 border-b border-white/5 px-3 py-2 last:border-b-0 ${selected ? "bg-primary/[0.08]" : "hover:bg-white/[0.035]"}`}><span className={`mono cursor-grab pt-1 text-[9px] ${selected ? "text-primary" : "text-[#8b9085]"}`}>{String(index + 1).padStart(2, "0")}</span><button type="button" data-testid={`playlist-entry-${index}`} data-playlist-entry-id={entry.id} onClick={() => { playlistRunRef.current = true; void playPlaylistEntry(entry.id); }} className="min-w-0 text-left"><span data-testid={`playlist-entry-title-${index}`} title={entry.title} className="mono block truncate text-[10px] text-[#f5f4ec]">{entry.title}</span><span data-testid={`playlist-entry-path-${index}`} className="mono block truncate pt-0.5 text-[8px] text-[#8b9085]">{entry.origin.toUpperCase()} · {entry.format.toUpperCase()} · {entry.path ?? "remote URL"}</span></button><div className="flex flex-wrap items-center gap-1"><label className="mono flex items-center gap-1 text-[8px] text-[#a9aca2]">×<input aria-label={`${entry.title}のループ回数`} type="number" min={1} max={99} value={entryLoops} onChange={(event) => updatePlaylistEntryLoops(entry.id, Number(event.target.value))} className="mono w-9 border border-white/15 bg-black/20 px-1 py-1 text-center text-[9px] text-[#f5f4ec] outline-none focus:border-primary" /></label><button type="button" aria-label={`${entry.title}を上へ移動`} disabled={index === 0} onClick={() => moveEntryInPlaylist(index, index - 1)} className="mono border border-white/15 px-1.5 py-1 text-[8px] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-25">↑</button><button type="button" aria-label={`${entry.title}を下へ移動`} disabled={index === playlistEntries.length - 1} onClick={() => moveEntryInPlaylist(index, index + 1)} className="mono border border-white/15 px-1.5 py-1 text-[8px] text-[#a9aca2] hover:border-primary hover:text-primary disabled:opacity-25">↓</button><button type="button" aria-label={`${entry.title}をプレイリストから削除`} onClick={() => removeEntryFromPlaylist(entry.id)} className="mono border border-[#ff9b94]/35 px-1.5 py-1 text-[8px] text-[#ffb8b2] hover:bg-[#ff9b94]/10">×</button><span data-testid={`playlist-entry-state-${index}`} className={`mono inline-flex items-center gap-1 self-center text-[8px] uppercase tracking-[0.08em] ${loading || playing ? "text-primary" : pdxMissing ? "text-[#ff9b94]" : "text-[#a9aca2]"}`}>{loading && <LoaderCircle size={10} className="shrink-0 animate-spin" />}{loading ? "LOADING" : pdxMissing ? "PDX missing" : playing ? "playing" : "ready"}</span></div></div>; })}
+                    </div>}
+
+                    <div className="mt-2 flex items-start gap-1 border-t border-white/10 pt-2">
+                      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-[11px] leading-5 text-[#dfe1d8]">
+                        <input type="checkbox" checked={fadeDuringLoad} onChange={event => changeFadeDuringLoad(event.target.checked)} className="shrink-0 accent-primary" />
+                        読込中にフェードアウト
+                      </label>
+                      <HelpTooltip label="読込中のフェードアウト">ONにすると、次の曲の読み込み中に前の曲を約0.6秒でフェードアウトします。OFFでは切り替わるまで前の曲を流し続けます。OPM／PCM／内蔵SoundFontが対象で、外部MIDI機器の音量は変わりません。設定はこのブラウザに保存されます。</HelpTooltip>
+                    </div>
+                  </div></CompactPanel>
         </section>
+        <aside id="player-settings" ref={settingsPanelRef} className="program-settings" aria-label="プレーヤー設定" hidden={!settingsOpen}>
+          <div className="settings-heading"><div><span className="mono program-deck-label">Settings</span><p>音源・サウンド・タイミング</p></div><button type="button" onClick={() => { changeSettingsOpen(false); settingsToggleRef.current?.focus(); }} className="mono settings-close">閉じる</button></div>
+        <div className="compact-column program-source">
+          <CompactPanel id="source" title="音源 / Source" defaultOpen summary={mode === "local" ? fileName ?? "Local file" : mode === "remote" ? "Remote URL" : "MML"}>
+              <div className="flex overflow-x-auto border-b border-white/10">
+                    {([
+                      ["local", "LOCAL FILE", FolderOpen],
+                      ["remote", "REMOTE URL", CloudDownload],
+                      ["mml", "MML SCORE", KeyboardMusic],
+                    ] as const).map(([id, label, Icon]) => <button key={id} aria-label={label} onClick={() => setMode(id)} className={`mono flex shrink-0 items-center gap-2 border-b-2 px-3 py-3 text-[10px] font-medium tracking-[0.12em] transition-colors ${mode === id ? "border-primary text-primary" : "border-transparent text-[#a9aca2] hover:text-[#f5f4ec]"}`}><Icon size={14} />{id === "local" ? "FILE" : id === "remote" ? "URL" : "MML"}</button>)}
+                  </div>
+              {mode === "mml" && <div className="pt-5">
+                    <div className="flex items-center justify-between"><SmallLabel help={<>T, O, L, V, A–G, R, &lt;, &gt;, +, -, #、@OPM / @PCM / @MIDI に対応します。</>}>MML editor / channel 01</SmallLabel><span className="mono text-[10px] text-[#a9aca2]">{mml.length} chars</span></div>
+                    <textarea value={mml} onChange={(event) => setMml(event.target.value)} spellCheck={false} className="mono mt-3 min-h-[176px] w-full resize-y border border-white/15 bg-[#11120f] p-4 text-sm leading-7 text-[#dfe1d8] outline-none transition-colors placeholder:text-[#6c7167] focus:border-primary" aria-label="MMLを入力" />
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3"><button onClick={() => { setMml(defaultMml); setMmlError(null); }} className="mono inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-[#d8ff3e] hover:underline"><RotateCcw size={12} />Restore sample</button></div>
+                    {mmlError && <p className="mono mt-3 border-l-2 border-[#ff746c] bg-[#ff746c]/10 px-3 py-2 text-[10px] leading-5 text-[#ffd6d2]">{mmlError}</p>}
+                  </div>}
+              {mode === "local" && <div className="compact-source-form"><div onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={onDrop} onClick={() => sourceInputRef.current?.click()} role="button" tabIndex={0} aria-label="音源ファイルを選択" onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); sourceInputRef.current?.click(); } }} className={`compact-dropzone grid place-items-center border border-dashed p-5 text-center transition-colors ${isDragging ? "border-primary bg-primary/[0.07]" : "border-white/20 bg-[#11120f] hover:border-primary/60"}`}>
+                      <div><div className="mx-auto grid h-12 w-12 place-items-center border border-primary/60 text-primary"><Upload size={20} /></div><p className="display mb-0 mt-5 text-xl font-semibold tracking-[-0.04em] text-[#f5f4ec]">{fileName ?? "MDR / MDX / PDXを置く"}</p></div>
+                    </div>
+<input ref={sourceInputRef} type="file" multiple accept=".mdr,.mdx,.pdx,application/octet-stream" className="hidden" onChange={selectSource} />
+<input ref={folderInputRef} type="file" multiple {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} className="hidden" onChange={selectFolder} />
+<div className="mt-3 flex flex-wrap items-center gap-3"><HelpTooltip label="音源ファイルの選択">クリックしてファイルを選択、またはここへドラッグ。MDR／MDXとPDXは同時選択、または後から追加できます。</HelpTooltip><button onClick={() => folderInputRef.current?.click()} className="mono shrink-0 border border-primary/45 bg-primary/[0.045] px-3 py-2 text-[9px] uppercase tracking-[0.08em] text-primary transition-colors hover:bg-primary hover:text-primary-foreground">Folder / playlist</button></div></div>}
+              {mode === "remote" && <div className="compact-source-form"><div><div className="flex items-center justify-between gap-3"><SmallLabel help={<>通常URLはCORS応答が必要です。Google Drive／Dropboxの<strong>公開共有リンク</strong>は、このサービスの許可済み取得経路で読み込むためブラウザ側CORSに依存しません。ログイン必須・閲覧制限・ダウンロード禁止のファイルは取得しません。</>}>Remote MDR / MDX URL</SmallLabel>{isCloudShareLink(remoteMdr) && <span className="mono text-[9px] uppercase tracking-[0.09em] text-primary">Share proxy ready</span>}</div><input value={remoteMdr} onChange={(event) => setRemoteMdr(event.target.value)} placeholder="https://storage.example/song.mdr または song.mdx／Drive・Dropbox共有リンク" className="mono mt-2 w-full border border-white/15 bg-[#11120f] px-3 py-3 text-xs text-[#f5f4ec] outline-none placeholder:text-[#62675d] focus:border-primary" /></div>
+<div><div className="flex items-center justify-between gap-3"><SmallLabel>Companion PDX URL / optional</SmallLabel>{isCloudShareLink(remotePdx) && <span className="mono text-[9px] uppercase tracking-[0.09em] text-primary">Share proxy ready</span>}</div><input value={remotePdx} onChange={(event) => setRemotePdx(event.target.value)} placeholder="https://storage.example/song.pdx または Drive／Dropbox共有リンク" className="mono mt-2 w-full border border-white/15 bg-[#11120f] px-3 py-3 text-xs text-[#f5f4ec] outline-none placeholder:text-[#62675d] focus:border-primary" /></div>
+<div className="flex items-center gap-2"><Button onClick={loadRemote} disabled={remoteLoading} className="h-9 rounded-none bg-primary px-3 text-[10px] font-semibold text-primary-foreground hover:bg-[#e5ff76]">{remoteLoading ? <LoaderCircle size={14} className="animate-spin" /> : <CloudDownload size={14} />}{remoteLoading ? "Loading" : "Load source"}</Button></div>
+<CompactPanel id="catalog" title="リモートカタログ" defaultOpen summary={`${catalogEntries.length} 曲`}>
+  <div className="flex flex-wrap items-center justify-between gap-2">
+    <SmallLabel help={<>配列または<code>entries</code> / <code>tracks</code> / <code>songs</code>配列を受け付けます。これをリモートフォルダ用マニフェストとして扱い、各項目は<code>mdrUrl</code>（MDXも可）と任意の<code>pdxUrl</code>を指定します。Google Drive／Dropboxは<strong>公開共有JSONファイル</strong>を指定してください。フォルダのHTML一覧は取得しません。</>}>Remote catalog / JSON</SmallLabel>
+    <span className={`mono text-[9px] ${catalogIsDriveLink ? "text-primary" : "text-[#a9aca2]"}`}>{catalogIsDriveLink ? "DRIVE DETECTED" : "CORS REQUIRED"}</span>
+  </div>
+  <div className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
+    <select
+      aria-label="カタログの取得元"
+      value={catalogSourcePreset}
+      onChange={(event) => {
+        const preset = event.target.value as "cors" | "google-drive" | "dropbox" | "signal-deck-demo";
+        setCatalogSourcePreset(preset);
+        if (preset === "signal-deck-demo") {
+          setCatalogUrl(signalDeckDemoCatalogUrl);
+          setNotice("Signal DeckのCORS検証済み診断カタログをセットしました。LOAD CATALOGで最小MDRを読み込めます。");
+        } else if (preset !== "cors") {
+          setNotice(`${preset === "google-drive" ? "Google Drive" : "Dropbox"}共有JSONを選択しました。公開共有ファイルのリンクを貼り付けてLOADを押してください。`);
+        }
+      }}
+      className="mono w-full min-w-0 border border-white/15 bg-[#11120f] px-3 py-2.5 text-[10px] text-[#dfe1d8] outline-none focus:border-primary"
+    >
+      <option value="cors">Custom CORS JSON</option>
+      <option value="signal-deck-demo">Signal Deck diagnostic catalog</option>
+      <option value="google-drive">Google Drive shared JSON</option>
+      <option value="dropbox">Dropbox shared JSON</option>
+    </select>
+    <label className="block min-w-0">
+      <span className="text-xs text-[#dfe1d8]">カタログJSONのURL</span>
+      <input
+        aria-label="リモートカタログJSONのURL"
+        type="url"
+        value={catalogUrl}
+        onChange={(event) => setCatalogUrl(event.target.value)}
+        placeholder={catalogSourcePreset === "signal-deck-demo" ? signalDeckDemoCatalogUrl : catalogSourcePreset === "google-drive" ? "https://drive.google.com/file/d/FILE_ID/view" : catalogSourcePreset === "dropbox" ? "https://www.dropbox.com/scl/fi/.../catalog.json" : "https://storage.example/madrv-catalog.json"}
+        className="mono mt-1 w-full min-w-0 border border-white/25 bg-[#11120f] px-3 py-2.5 text-[10px] text-[#f5f4ec] outline-none placeholder:text-[#a9aca2] focus:border-primary"
+      />
+    </label>
+    <button onClick={loadCatalog} disabled={catalogLoading} className="mono w-full min-w-0 border border-white/25 px-3 py-2 text-[9px] uppercase tracking-[0.08em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">Load catalog</button>
+  </div>
+{(catalogEntries.length > 0 || favoriteEntries.length > 0) && <div className="mt-3">
+                        <input value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="タイトル、作者、タグを検索" className="mono w-full border border-white/10 bg-[#11120f] px-3 py-2 text-[10px] text-[#f5f4ec] outline-none placeholder:text-[#62675d] focus:border-primary" />
+                        <div className="mt-2 max-h-52 overflow-y-auto border border-white/10 bg-[#11120f]">
+                          {filteredCatalogEntries.slice(0, 24).map((entry) => { const favorite = favoriteEntries.some((item) => item.id === entry.id); return <div key={entry.id} className="grid grid-cols-[1fr_auto] gap-2 border-b border-white/5 px-3 py-2 last:border-b-0"><button onClick={() => { setPlaylistIndex(playlistEntries.findIndex((candidate) => candidate.id === `remote:${entry.id}`)); playlistRunRef.current = false; void loadRemoteEntry(entry.mdrUrl, entry.pdxUrl, entry.title); }} className="min-w-0 text-left"><span className="mono block truncate text-[10px] text-[#f5f4ec] hover:text-primary">{entry.title}</span><span className="mono block truncate pt-1 text-[8px] text-[#a9aca2]">{[entry.artist, ...entry.tags].filter(Boolean).join(" · ") || entry.mdrUrl}</span></button><button onClick={() => toggleCatalogFavorite(entry)} className={`mono self-center border px-2 py-1 text-[9px] ${favorite ? "border-primary bg-primary text-primary-foreground" : "border-white/20 text-[#a9aca2] hover:border-primary hover:text-primary"}`}>{favorite ? "★" : "☆"}</button></div>; })}
+                          {!filteredCatalogEntries.length && favoriteEntries.length > 0 && favoriteEntries.filter((entry) => [entry.title, entry.artist ?? "", ...entry.tags].join(" ").toLowerCase().includes(catalogQuery.trim().toLowerCase())).map((entry) => <div key={`favorite-${entry.id}`} className="grid grid-cols-[1fr_auto] gap-2 border-b border-white/5 px-3 py-2 last:border-b-0"><button onClick={() => { setPlaylistIndex(playlistEntries.findIndex((candidate) => candidate.id === `remote:${entry.id}`)); playlistRunRef.current = false; void loadRemoteEntry(entry.mdrUrl, entry.pdxUrl, entry.title); }} className="min-w-0 text-left"><span className="mono block truncate text-[10px] text-primary">★ {entry.title}</span><span className="mono block truncate pt-1 text-[8px] text-[#a9aca2]">{entry.artist ?? entry.mdrUrl}</span></button><button onClick={() => toggleCatalogFavorite(entry)} className="mono self-center border border-white/20 px-2 py-1 text-[9px] text-[#a9aca2] hover:border-primary hover:text-primary">☆</button></div>)}
+                          {!filteredCatalogEntries.length && !favoriteEntries.length && <p className="mono m-0 px-3 py-3 text-[9px] text-[#72776d]">該当する曲なし</p>}
+                        </div>
+                      </div>}
+</CompactPanel></div>}
+            </CompactPanel>
+          {recentSources.length > 0 && <CompactPanel id="recent" title="最近の音源" summary={`${recentSources.length} 件`}>{recentSources.length > 0 && <div aria-label="最近使用した音源" data-testid="recent-sources" className="mt-4 border border-white/10 bg-[#11120f] p-3">
+                    <div className="flex items-center justify-between gap-3"><SmallLabel help={<>公開URLのみワンクリック再読込。ローカルファイルはブラウザ制約で履歴に残せません。</>}>Recent sources / remote URLs</SmallLabel><button type="button" onClick={clearSourceHistory} className="mono text-[8px] uppercase tracking-[0.08em] text-[#a9aca2] hover:text-primary">Clear</button></div>
+
+                    <div className="mt-2 divide-y divide-white/10">{recentSources.map((source) => <div key={source.id} className="flex items-center gap-2 py-2 first:pt-0 last:pb-0"><button type="button" onClick={() => reopenRecentSource(source)} className="min-w-0 flex-1 text-left"><span className="mono block truncate text-[10px] text-[#f5f4ec] hover:text-primary">{source.label}</span><span className="mono block truncate pt-0.5 text-[8px] uppercase tracking-[0.08em] text-[#8b9085]">Remote · reload · {source.format?.toUpperCase() ?? "MADRV"}{source.pdxName ? ` · ${source.pdxName}` : ""}</span></button><button type="button" aria-label={`履歴から${source.label}を削除`} onClick={() => removeSourceHistory(source.id)} className="mono shrink-0 border border-white/15 px-2 py-1 text-[8px] text-[#a9aca2] hover:border-[#ff9b94] hover:text-[#ffb8b2]">×</button></div>)}</div>
+                  </div>}</CompactPanel>}
+          {(mdrInfo || localMdxInfo) && <CompactPanel id="source-info" title="音源情報 / PDX" summary={mdrInfo ? `${mdrInfo.activeTracks} tracks` : "MDX"}>
+              {mode === "local" && <>{localSourceFormat === "mdx" && localMdxInfo && <div className="mt-4 border border-primary/30 bg-primary/[0.045] p-4">
+                      <div className="flex items-center justify-between gap-3"><SmallLabel help={<>MDXとPDXを同時に選ぶか、必要なPDXを後から追加すると、同名ファイルを自動選択します。</>}>MDX link analysis</SmallLabel><span className={`mono text-[9px] uppercase tracking-[0.1em] ${localPdx ? "text-primary" : "text-[#ffb8b2]"}`}>{localPdx ? "PDX READY" : localMdxPdxName ? "PDX REQUIRED" : "PDX NOT REQUIRED"}</span></div>
+                      <dl className="mt-3 grid gap-x-4 gap-y-3 sm:grid-cols-2">
+                        <div><dt className="mono text-[9px] uppercase tracking-[0.12em] text-[#a9aca2]">MDX title</dt><dd className="mono mt-1 break-words text-xs text-[#f5f4ec]">{localMdxInfo.title}</dd></div>
+                        <div><dt className="mono text-[9px] uppercase tracking-[0.12em] text-[#a9aca2]">Required PDX</dt><dd className="mono mt-1 break-words text-xs text-[#f5f4ec]">{localMdxPdxName ? formatPdxFileName(localMdxPdxName) : "Not required"}</dd></div>
+                        <div><dt className="mono text-[9px] uppercase tracking-[0.12em] text-[#a9aca2]">Linked PDX</dt><dd className="mono mt-1 break-words text-xs text-[#f5f4ec]">{localPdxFileName || "Not selected"}</dd></div>
+                        <div><dt className="mono text-[9px] uppercase tracking-[0.12em] text-[#a9aca2]">Link method</dt><dd className="mono mt-1 text-xs text-[#f5f4ec]">{localPdx ? (localPdxAutoMatched ? "Auto-matched" : "Selected") : "Awaiting PDX"}</dd></div>
+                        <div><dt className="mono text-[9px] uppercase tracking-[0.12em] text-[#a9aca2]">PCM activity</dt><dd className={`mono mt-1 text-xs ${pcmActivityMask > 0 ? "text-primary" : "text-[#a9aca2]"}`}>{pcmActivityMask > 0 ? `Active · ch ${Array.from({ length: 8 }, (_, channel) => channel + 1).filter((channel) => (pcmActivityMask & (1 << (channel - 1))) !== 0).join(", ")}` : "Awaiting PCM activity"}</dd></div>
+                        <div><dt className="mono text-[9px] uppercase tracking-[0.12em] text-[#a9aca2]">Engine output</dt><dd className={`mono mt-1 text-xs ${mixOutputPeak > 0 ? "text-primary" : "text-[#a9aca2]"}`}>{mixOutputPeak > 0 ? `Non-zero · peak ${mixOutputPeak}` : "Awaiting playback"}</dd></div>
+                      </dl>
+                      <p className="mono mt-3 border-t border-white/10 pt-3 text-[9px] leading-5 text-[#a9aca2]">PDX候補: {localPdxCandidates.length ? localPdxCandidates.map((candidate) => candidate.name).join(" · ") : "なし"}</p>
+                    </div>}
+{localSourceFormat === "mdr" && mdrInfo && <MdrMetadataPanel info={mdrInfo} linkedPdxName={localPdxFileName} sourceLabel="Local MDR" estimatedDuration={mdrEstimatedDuration} />}</>}
+              {mode === "remote" && mdrInfo && <MdrMetadataPanel info={mdrInfo} linkedPdxName={remotePdx} sourceLabel="Remote MDR" estimatedDuration={mdrEstimatedDuration} />}
+            </CompactPanel>}
+          <CompactPanel id="share" defaultOpen title="セッション共有" summary="Short link"><div className="compact-share-actions flex items-center gap-1"><HelpTooltip label="セッション共有">公開MDR／PDX／SoundFont URL、MML、ループ上限を短い共有IDで復元します。音声・ローカルファイル・外部MIDI機器・診断ログは共有しません。既存の長い共有URLも引き続き開けます。</HelpTooltip><Button onClick={copySessionLink} disabled={sharedSessionCreate.isPending} variant="outline" className="h-10 shrink-0 rounded-none border-primary/50 px-3 text-[10px] font-medium uppercase tracking-[0.08em] text-primary hover:bg-primary/10"><Share2 size={14} />{sharedSessionCreate.isPending ? "Creating" : "Copy short link"}</Button></div>
+{sessionLink && <input value={sessionLink} readOnly onFocus={(event) => event.currentTarget.select()} aria-label="共有セッションリンク" className="mono mt-3 w-full border border-white/15 bg-[#11120f] px-3 py-2 text-[9px] text-[#dfe1d8] outline-none focus:border-primary" />}</CompactPanel>
+          <CompactPanel id="export" defaultOpen title="動画書き出し" summary="MP4 / WebM"><div className="compact-export"><label className="block"><SmallLabel>最大秒数</SmallLabel><input type="number" min="10" max="600" value={exportLimit} onChange={(event) => setExportLimit(Math.max(10, Math.min(600, Number(event.target.value) || 60)))} className="mono mt-2 w-full border border-white/15 bg-[#11120f] px-3 py-2 text-xs text-[#f5f4ec] outline-none focus:border-primary" /></label>
+<div className="flex items-center gap-1 self-end"><HelpTooltip label="動画書き出し">∞設定でも書き出しは1回・最大秒数に制限されます。</HelpTooltip><Button onClick={exportMml} disabled={isExporting} className="self-end rounded-none bg-[#e4e6dc] px-4 py-5 text-[10px] font-bold uppercase tracking-[0.1em] text-[#11120f] hover:bg-primary">{isExporting ? <LoaderCircle size={15} className="animate-spin" /> : <FileAudio size={15} />}{isExporting ? "Rendering" : "Export MP4"}</Button></div></div></CompactPanel>
+        </div>
         <div className="compact-column program-output">
           <CompactPanel ref={soundFontPanelRef} id="soundfont" title="SoundFont / MIDI" defaultOpen summary={soundfontName}>
+          <div className="settings-soundfont" role="group" aria-label="SoundFont bank"><span className="mono settings-soundfont-label">SoundFont bank</span><HelpTooltip label="SoundFont bank">GS向けSF2/DLSをローカルから選べます。MMLの@MIDIおよびMDRのMIDIトラックに使用します。</HelpTooltip><button ref={soundFontBankButtonRef} data-testid="soundfont-bank-button" title={soundfontName} onClick={() => sf2InputRef.current?.click()} className="mt-2 flex w-full items-center justify-between border border-white/15 bg-[#11120f] p-3 text-left outline-none transition-colors hover:border-primary/70 focus:border-primary focus:ring-1 focus:ring-primary/50"><span className="mono max-w-[190px] truncate text-[10px] text-[#e4e6dc]">{soundfontName}</span><ChevronDown size={15} className="text-primary" /></button>
+<input ref={sf2InputRef} type="file" accept=".sf2,.sf3,.dls" className="hidden" onChange={selectSoundFont} /></div>
+
 
 
               <div className="flex items-center gap-1"><HelpTooltip label="MIDI出力">外部出力では@MIDIのノートとAll Notes Offを選択機器へ送出します。OPM・PCMはブラウザ内で鳴ります。</HelpTooltip><div className="compact-midi-destination min-w-0 flex-1 grid grid-cols-2 gap-1 border border-white/15 bg-[#11120f] p-1">
@@ -1852,9 +2044,6 @@ export default function Home() {
 <div className="mt-2 flex gap-1.5"><input value={remoteSoundfontUrl} onChange={(event) => setRemoteSoundfontUrl(event.target.value)} placeholder="https://example.org/gs.sf2 またはDrive／Dropbox共有リンク" className="mono min-w-0 flex-1 border border-white/15 bg-[#11120f] px-2.5 py-2 text-[9px] text-[#f5f4ec] outline-none placeholder:text-[#62675d] focus:border-primary" /><button onClick={() => void loadRemoteSoundFont()} disabled={remoteSoundfontLoading} className="mono border border-white/25 px-2 text-[8px] uppercase tracking-[0.07em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">{remoteSoundfontLoading ? <LoaderCircle size={12} className="animate-spin" /> : "Load"}</button></div>
 <button onClick={() => void loadDefaultSoundFont()} disabled={remoteSoundfontLoading} className="mono mt-2 w-full border border-primary/35 bg-primary/[0.04] px-2 py-2 text-left text-[8px] uppercase tracking-[0.06em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">{remoteSoundfontLoading ? "Loading default SoundFont…" : "Load default SoundFont · GeneralUser GS v1.471"}</button>
 {remoteSoundfontProgress && <div data-testid="remote-soundfont-progress" className={`mt-3 border p-2.5 ${remoteSoundfontProgress.stage === "failed" ? "border-[#ff9b94]/50 bg-[#ff9b94]/[0.04]" : "border-primary/30 bg-primary/[0.035]"}`}><div className="flex items-center justify-between gap-3"><span className={`mono text-[8px] uppercase tracking-[0.08em] ${remoteSoundfontProgress.stage === "failed" ? "text-[#ff9b94]" : "text-primary"}`}>{remoteSoundfontProgress.stage === "downloading" ? "SoundFont downloading" : remoteSoundfontProgress.stage === "initializing" ? "Download complete · initializing" : remoteSoundfontProgress.stage === "ready" ? "SoundFont ready" : "SoundFont load failed"}</span><span data-testid="remote-soundfont-progress-percent" className="mono text-[9px] text-[#dfe1d8]">{remoteSoundfontProgress.totalBytes && remoteSoundfontProgress.totalBytes > 0 ? `${Math.min(100, Math.round(remoteSoundfontProgress.loadedBytes / remoteSoundfontProgress.totalBytes * 100))}%` : "SIZE UNKNOWN"}</span></div><div role="progressbar" aria-label="SoundFont download progress" aria-valuemin={0} aria-valuemax={remoteSoundfontProgress.totalBytes ?? undefined} aria-valuenow={remoteSoundfontProgress.totalBytes ? Math.min(remoteSoundfontProgress.loadedBytes, remoteSoundfontProgress.totalBytes) : undefined} aria-valuetext={remoteSoundfontProgress.totalBytes ? `${formatByteSize(remoteSoundfontProgress.loadedBytes)} / ${formatByteSize(remoteSoundfontProgress.totalBytes)}` : `${formatByteSize(remoteSoundfontProgress.loadedBytes)} received`} className="mt-2 h-px overflow-hidden bg-white/15"><div className={`h-full transition-[width] duration-150 ${remoteSoundfontProgress.stage === "failed" ? "bg-[#ff9b94]" : "bg-primary"} ${remoteSoundfontProgress.totalBytes ? "" : "animate-pulse"}`} style={{ width: `${remoteSoundfontProgress.totalBytes && remoteSoundfontProgress.totalBytes > 0 ? Math.max(0, Math.min(100, remoteSoundfontProgress.loadedBytes / remoteSoundfontProgress.totalBytes * 100)) : 16}%` }} /></div><p data-testid="remote-soundfont-progress-bytes" className="mono mb-0 mt-2 text-[8px] leading-4 text-[#a9aca2]">{formatByteSize(remoteSoundfontProgress.loadedBytes)}{remoteSoundfontProgress.totalBytes ? ` / ${formatByteSize(remoteSoundfontProgress.totalBytes)}` : " received · total size not provided"}{remoteSoundfontProgress.stage === "initializing" ? " · SoundFontを初期化中" : remoteSoundfontProgress.stage === "ready" ? " · ready" : ""}</p></div>}</CompactPanel>
-            </CompactPanel>
-          <CompactPanel id="levels" title="出力レベル" defaultOpen summary={`OPM / PCM ${opmLevel}% · MIDI ${midiLevel}%`}>
-              <div className="compact-levels">{engineRows.map(engine => { const [level, setLevel] = activeLevels[engine.id]; return <label key={engine.id} className="compact-level"><span className="mono">{engine.label}</span><EngineStatus active={isEngineActive(engine.id)} /><input type="range" min="0" max="100" value={level} onChange={event => { const value = Number(event.target.value); if (engine.id === "opm") { setOpmLevel(value); setPcmLevel(value); audio().setLevel("opm", value); audio().setLevel("pcm", value); } else { setLevel(value); audio().setLevel("midi", value); } }} className="range-control" aria-label={`${engine.label}の出力レベル`} /><span className="mono">{level}%</span></label>; })}</div>
             </CompactPanel>
           <CompactPanel id="timing" title="MIDIのタイミング補正" summary={midiOutputMode === "soundfont" ? `SF ${activeSoundFontMdrDelayMs} ms` : `MIDI ${externalMidiAdvanceMs} ms`}>
               {midiOutputMode === "soundfont" && <div aria-label="SoundFont MDR遅延補正" data-testid="soundfont-timing-profile" className="mt-3 border border-[#8fa7cc]/40 bg-[#8fa7cc]/[0.05] p-3">
@@ -1895,8 +2084,8 @@ export default function Home() {
 
             </CompactPanel>
         </div>
-      </main>
-      <section className="compact-debug" aria-label="デバッグ情報">
+          {activeMixerTracks.length > 0 && <CompactPanel id="activity" title="トラック発音状況" summary={`${activeMixerTracks.length} tracks`}><div data-testid="track-key-overview"><ChannelNoteState tracks={activeMixerTracks} trackKeyState={trackKeyState} mutedTracks={mutedTracks} pcmActivityMask={pcmActivityMask} /></div></CompactPanel>}
+      <section className="settings-debug" aria-label="デバッグ情報">
           <CompactPanel id="diagnostics" title="再生情報（デバッグ）" summary={`${(audioSampleRate / 1000).toFixed(1)} kHz`}><div data-testid="playback-diagnostics" className="program-diagnostics grid gap-px border border-white/10 bg-white/10 sm:grid-cols-3">
                   <div className="bg-[#11120f] px-3 py-2"><SmallLabel help={<>{tempoSource}</>}>Tempo / estimated</SmallLabel><p aria-label="推定BPM" className="mono m-0 mt-0.5 text-xl leading-tight text-primary">{estimatedBpm ? `${estimatedBpm.toFixed(1)} BPM` : "— BPM"}</p></div>
                   <div className="bg-[#11120f] px-3 py-2"><SmallLabel help={<>{timerBHint}</>}>Timer-B / OPM reg 12</SmallLabel><p aria-label="Timer-B値" className="mono m-0 mt-0.5 text-xl leading-tight text-[#f5f4ec]">{timerB === null ? "—" : `0x${timerB.toString(16).padStart(2, "0").toUpperCase()}`}</p></div>
@@ -1905,6 +2094,8 @@ export default function Home() {
                   <div className="bg-[#11120f] px-3 py-2"><SmallLabel help={<>MIDIの予約時刻からSoundFont側で適用するまでの遅れ。OPMとの実際の発音差ではありません。</>}>GS MIDI / dispatch delay</SmallLabel><p aria-label="GS MIDI同期差" className="mono m-0 mt-0.5 text-xl leading-tight text-[#f5f4ec]">{mdrMidiClockDeltaMs === null ? "—" : `${mdrMidiClockDeltaMs >= 0 ? "+" : ""}${mdrMidiClockDeltaMs.toFixed(0)} ms`}</p></div>
                 </div></CompactPanel>
       </section>
+        </aside>
+      </main>
       {formatGuideOpen && <Suspense fallback={<span role="status" className="mono text-xs">ガイドを読み込み中…</span>}><FormatGuideDialog open={formatGuideOpen} onOpenChange={setFormatGuideOpen} /></Suspense>}
     </div>
 
