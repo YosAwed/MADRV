@@ -8,21 +8,36 @@ function harness() {
   const reports: MadrvSoundfontTiming[] = [];
   const released: MadrvSoundfontMidi[] = [];
   const stopAll = vi.fn();
+  const restored = vi.fn();
   const scheduler = new MadrvSoundfontScheduler({
     sampleRate: 48_000,
     apply: event => applied.push(event),
     release: event => released.push(event),
     report: timing => reports.push(timing),
     stopAll,
+    restored,
   });
   scheduler.handle({ type: "madrv-reset", generation: 1 }, 0);
   const send = (targetAt: number, bytes = [0x90, 60, 100], sourceTrack = 16, generation = 1, receivedAt = 0) => {
     scheduler.handle({ type: "madrv-midi", generation, sourceTrack, bytes, targetAt }, receivedAt);
   };
-  return { scheduler, applied, released, reports, stopAll, send };
+  return { scheduler, applied, released, reports, stopAll, send, restored };
 }
 
 describe("cancellable SoundFont audio-thread scheduler", () => {
+  it("acknowledges ordered settings restoration but rejects stale batches and note floods", () => {
+    const { scheduler, applied, restored } = harness();
+    const messages = [[0xb0, 101, 0], [0xb0, 100, 0], [0xb0, 6, 12], [0xc0, 42]];
+    scheduler.handle({ type: "madrv-restore", generation: 1, requestId: 7, messages }, 0);
+    expect(applied.map(event => event.bytes)).toEqual(messages);
+    expect(restored).toHaveBeenCalledWith(1, 7);
+    scheduler.handle({ type: "madrv-reset", generation: 2 }, 0);
+    scheduler.handle({ type: "madrv-restore", generation: 1, requestId: 8, messages }, 0);
+    scheduler.handle({ type: "madrv-restore", generation: 2, requestId: 9, messages: [[0x90, 60, 100]] }, 0);
+    scheduler.handle({ type: "madrv-restore", generation: 2, requestId: 10, messages: Array(257).fill([0xc0, 1]) }, 0);
+    expect(applied).toHaveLength(4);
+    expect(restored).toHaveBeenCalledTimes(1);
+  });
   it("holds a long advance until the output deadline, within one quantum", () => {
     const { scheduler, send, applied } = harness();
     send(0.35);
@@ -187,6 +202,11 @@ describe("cancellable SoundFont audio-thread scheduler", () => {
     send({ type: "madrv-reset", generation: 1 });
     send({ type: "madrv-midi", generation: 1, sourceTrack: 16, bytes: [0xe0, 1, 64], targetAt: 0.25 });
     send({ type: "madrv-reset", generation: 2 });
+    send({ type: "madrv-restore", generation: 2, requestId: 10,
+      messages: [[0xc0, 42], [0xb0, 101, 0], [0xb0, 100, 0], [0xb0, 6, 12]] });
+    expect(messages).toContainEqual({ type: "madrv-restored", generation: 2, requestId: 10 });
+    expect(processor.core.synthesizer.midiChannels[0].patch.program).toBe(42);
+    expect(processor.core.synthesizer.midiChannels[0].midiParameters.pitchWheelRange).toBe(12);
     send({ type: "madrv-midi", generation: 2, sourceTrack: 16, bytes: [0xe0, 0, 64], targetAt: 0.3 });
     // Normal Spessa API must still work beside the custom MDR protocol.
     send({ type: "setChannelSystemParameter", channelNumber: 0, data: { parameter: "gain", value: 0.8 } });

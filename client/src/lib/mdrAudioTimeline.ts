@@ -13,7 +13,7 @@ export class MdrAudioTimeline {
   private terminated = false;
   private firstPlaybackTime?: number;
 
-  constructor(sampleRate: number) {
+  constructor(sampleRate: number, private readonly startSeconds = 0) {
     this.sampleRate = Number.isFinite(sampleRate) && sampleRate >= 8_000 && sampleRate <= 192_000 ? sampleRate : 48_000;
     // Preserve substantially more than the maximum 500 ms user timing correction.
     this.historyFrames = Math.ceil(this.sampleRate * 4);
@@ -21,7 +21,7 @@ export class MdrAudioTimeline {
 
   get ready(): boolean { return this.blocks.length > 0; }
   get ended(): boolean { return this.terminated; }
-  get renderedSeconds(): number { return this.outputFrames / this.sampleRate; }
+  get renderedSeconds(): number { return this.startSeconds + this.outputFrames / this.sampleRate; }
 
   /** Each timestamp belongs to the beginning of this output block, not to when its callback runs. */
   recordBlock(playbackTime: number, frameCount: number, terminated: boolean): void {
@@ -44,15 +44,15 @@ export class MdrAudioTimeline {
 
   /** Active playback exposes only rendered half-open intervals; a finished renderer exposes the continuing MIDI tail. */
   targetAt(songSeconds: number): number | undefined {
-    if (!Number.isFinite(songSeconds) || songSeconds < 0 || !this.ready) return undefined;
+    if (!Number.isFinite(songSeconds) || songSeconds < this.startSeconds || !this.ready) return undefined;
     const last = this.blocks.at(-1)!;
     if (songSeconds >= this.renderedSeconds) {
-      return this.terminated ? last.playbackTime + (songSeconds - last.startFrame / this.sampleRate) : undefined;
+      return this.terminated ? last.playbackTime + (songSeconds - this.startSeconds - last.startFrame / this.sampleRate) : undefined;
     }
     for (let index = this.blocks.length - 1; index >= 0; index -= 1) {
       const block = this.blocks[index]!;
-      const startSeconds = block.startFrame / this.sampleRate;
-      if (songSeconds >= startSeconds && songSeconds < block.endFrame / this.sampleRate) {
+      const startSeconds = this.startSeconds + block.startFrame / this.sampleRate;
+      if (songSeconds >= startSeconds && songSeconds < this.startSeconds + block.endFrame / this.sampleRate) {
         return block.playbackTime + (songSeconds - startSeconds);
       }
     }
@@ -62,7 +62,7 @@ export class MdrAudioTimeline {
 
   /** Holds song position across output gaps and never advances beyond audio that has actually been rendered. */
   songSecondsAt(audioTime: number): number {
-    if (!Number.isFinite(audioTime) || !this.ready || audioTime <= this.firstPlaybackTime!) return 0;
+    if (!Number.isFinite(audioTime) || !this.ready || audioTime <= this.firstPlaybackTime!) return this.startSeconds;
     const last = this.blocks.at(-1)!;
     const finalAudioEnd = last.playbackTime + (last.endFrame - last.startFrame) / this.sampleRate;
     if (this.terminated && audioTime >= finalAudioEnd) return this.renderedSeconds + (audioTime - finalAudioEnd);
@@ -70,9 +70,9 @@ export class MdrAudioTimeline {
       const block = this.blocks[index]!;
       if (audioTime < block.playbackTime) continue;
       const frameDuration = (block.endFrame - block.startFrame) / this.sampleRate;
-      return block.startFrame / this.sampleRate + Math.min(frameDuration, audioTime - block.playbackTime);
+      return this.startSeconds + block.startFrame / this.sampleRate + Math.min(frameDuration, audioTime - block.playbackTime);
     }
     // Queries older than retained history clamp to its oldest known song position.
-    return this.blocks[0]!.startFrame / this.sampleRate;
+    return this.startSeconds + this.blocks[0]!.startFrame / this.sampleRate;
   }
 }

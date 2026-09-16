@@ -2,6 +2,7 @@ import { OrderedMidiQueue } from "./orderedMidiQueue";
 import { MdrAudioTimeline } from "./mdrAudioTimeline";
 import { extendMdrTrackLoops } from "./mdrTrackLoops";
 import { advancePlaybackSilently, playbackSeekTarget } from "./playbackSeek";
+import { chaseMidiBefore, type MidiSeekPosition } from "./mdrMidiSeek";
 
 /* Signal Deck engine: MML is synthesized locally; MDR inspection follows the mpxadrv header and 32-track layout. */
 export type EngineKind = "opm" | "pcm" | "midi";
@@ -1860,6 +1861,8 @@ export class SignalDeckAudio {
   private mdrAudioTimeline?: MdrAudioTimeline;
   private mdrMidiPump?: () => void;
   private gsMidiPort?: MessagePort;
+  private midiRestoreRequestId = 0;
+  private pendingMidiRestore?: { generation: number; requestId: number; resolve(): void; reject(error: Error): void };
   private mdrMidiSchedulingStats: MdrMidiSchedulingStats | null = null;
   private mdrMidiMuteVersions = new Map<number, number>();
   /** Keyboard telemetry follows playback time even when audio is reserved a full block ahead. */
@@ -1924,16 +1927,20 @@ export class SignalDeckAudio {
   private playbackGeneration = 0;
   private transportFrame?: number;
   private seekPlayback?: (seconds: number) => Promise<MdrPlaybackInfo>;
+  private seekRequiresSoundFont = false;
   private externalMidiAdvanceMs = 0;
   private soundFontMdrDelayMs = 0;
   private midiOutputLevel = 0.72;
   private mdrSoundFontMuted = false;
 
-  canSeek(): boolean { return Boolean(this.seekPlayback) && !this.recording; }
+  canSeek(): boolean {
+    return Boolean(this.seekPlayback) && !this.recording
+      && (!this.seekRequiresSoundFont || Boolean(this.gsMidiPort && this.gsLoaded && !this.midiOutput));
+  }
 
   async seekTo(seconds: number): Promise<MdrPlaybackInfo> {
     const seek = this.seekPlayback;
-    if (!seek || this.recording) throw new Error("この再生では位置移動を利用できません。MDX／MIDIを含まないMDRの再生中に操作してください。");
+    if (!seek || !this.canSeek()) throw new Error("この再生では位置移動を利用できません。MDXまたは内蔵SoundFontを使うMDRの再生中に操作してください。");
     return seek(seconds);
   }
 
@@ -2415,9 +2422,13 @@ export class SignalDeckAudio {
         // Install before the library's handler; our private telemetry is not a
         // SpessaSynth protocol message and must not reach that handler.
         node.port.addEventListener("message", event => {
-          if (event.data?.type !== "madrv-midi-timing") return;
+          if (event.data?.type !== "madrv-midi-timing" && event.data?.type !== "madrv-restored") return;
           event.stopImmediatePropagation();
-          if (this.gsMidiPort === node.port) this.handleMdrMidiTiming(event.data);
+          if (this.gsMidiPort !== node.port) return;
+          if (event.data.type === "madrv-restored") {
+            const pending = this.pendingMidiRestore;
+            if (pending && pending.generation === event.data.generation && pending.requestId === event.data.requestId) pending.resolve();
+          } else this.handleMdrMidiTiming(event.data);
         });
         return node;
       } },
@@ -2580,6 +2591,22 @@ export class SignalDeckAudio {
     this.gsMidiPort?.postMessage({ type: "madrv-mute", generation: this.playbackGeneration, tracks: Array.from(this.mutedMdrTracks) });
   }
 
+  private restoreMdrMidiSettings(messages: number[][], generation: number): Promise<void> {
+    throwIfPlaybackSuperseded(generation, this.playbackGeneration);
+    if (!this.gsMidiPort || this.midiOutput) throw new Error("内蔵SoundFontの状態を復元できません。");
+    const requestId = ++this.midiRestoreRequestId;
+    return new Promise<void>((resolve, reject) => {
+      const finish = (error?: Error) => {
+        window.clearTimeout(timeout);
+        if (this.pendingMidiRestore?.requestId === requestId) this.pendingMidiRestore = undefined;
+        if (error) reject(error); else resolve();
+      };
+      const timeout = window.setTimeout(() => finish(new Error("SoundFontの状態復元がタイムアウトしました。停止して再生し直してください。")), 5000);
+      this.pendingMidiRestore = { generation, requestId, resolve: () => finish(), reject: finish };
+      this.gsMidiPort!.postMessage({ type: "madrv-restore", generation, requestId, messages });
+    });
+  }
+
   private handleMdrMidiTiming(data: MdrMidiSchedulingStats) {
     if (data.generation !== this.playbackGeneration) return;
     this.mdrMidiSchedulingStats = { generation: data.generation, appliedCount: data.appliedCount, lateCount: data.lateCount, maxLateSeconds: data.maxLateSeconds, receivedLateCount: data.receivedLateCount, maxReceiptLateSeconds: data.maxReceiptLateSeconds, lastAppliedAt: data.lastAppliedAt, lastTargetAt: data.lastTargetAt, pendingCount: data.pendingCount };
@@ -2587,7 +2614,8 @@ export class SignalDeckAudio {
     this.mdrMidiSyncListener?.({ kind: "worklet-dispatch", scheduledSeconds: data.lastTargetAt, dispatchedSeconds: data.lastAppliedAt, hardwareMilliseconds: this.mdrPlayer?.getPlayAtMilliseconds() ?? null });
   }
 
-  private startMdrMidiTimeline(events: readonly ScheduledMdrMidiEvent[], startsAt: number, loopWindow?: MdrMidiLoopWindow) {
+  private startMdrMidiTimeline(events: readonly ScheduledMdrMidiEvent[], startsAt: number, loopWindow?: MdrMidiLoopWindow,
+    position: MidiSeekPosition = { cursor: 0, cycle: 0 }, useHardwareClock = true) {
     if (!events.length) {
       this.mdrMidiTimelineComplete = true;
       return;
@@ -2605,8 +2633,8 @@ export class SignalDeckAudio {
     // replaying all events from t=0 or following a trailing release tail.
     const timelineEvents = safeLoopWindow ? selectMdrMidiLoopWindowEvents(events, safeLoopWindow) : events;
     const loopStartIndex = safeLoopWindow ? timelineEvents.findIndex((event) => event.at >= safeLoopWindow.startSeconds) : 0;
-    let cursor = 0;
-    let cycle = 0;
+    let cursor = position.cursor;
+    let cycle = position.cycle;
     const midiClock = new MdrPlaybackClock();
     this.mdrMidiTimelineComplete = false;
     this.lastMidiSyncUpdateAt = Number.NEGATIVE_INFINITY;
@@ -2620,12 +2648,12 @@ export class SignalDeckAudio {
         return;
       }
       const elapsed = Math.max(0, context.currentTime - startsAt);
-      const hardwareMilliseconds = this.mdrPlayer?.getPlayAtMilliseconds() ?? null;
+      const hardwareMilliseconds = useHardwareClock ? this.mdrPlayer?.getPlayAtMilliseconds() ?? null : null;
       // Keep the initial buffering offset while OPM/PCM runs. After its shorter
       // ending, advance from that final song position on the live audio clock.
       const hardwareElapsed = outputTimeline
         ? outputTimeline.songSecondsAt(context.currentTime)
-        : midiClock.read(elapsed, hardwareMilliseconds, this.mdrPlayer?.isTerminated() ?? false);
+        : midiClock.read(elapsed, hardwareMilliseconds, useHardwareClock && (this.mdrPlayer?.isTerminated() ?? false));
       if (infinite && safeLoopWindow && cursor >= timelineEvents.length && loopStartIndex >= 0) {
         const nextCycleBoundary = safeLoopWindow.endSeconds + cycle * safeLoopPeriod;
         if ((outputTimeline && !outputTimeline.ended ? outputTimeline.renderedSeconds : hardwareElapsed + lookaheadSeconds) >= nextCycleBoundary) {
@@ -2690,7 +2718,9 @@ export class SignalDeckAudio {
 
   stop() {
     this.playbackGeneration += 1;
+    this.pendingMidiRestore?.reject(new Error("再生位置の移動を中止しました。"));
     this.seekPlayback = undefined;
+    this.seekRequiresSoundFont = false;
     if (this.transportFrame !== undefined) cancelAnimationFrame(this.transportFrame);
     this.transportFrame = undefined;
     this.resetMdrMidiScheduler();
@@ -2759,16 +2789,15 @@ export class SignalDeckAudio {
     }, (score.duration + 0.12) * 1000);
   }
 
-  async playMdr(mdr: ArrayBuffer, pdx: ArrayBuffer | undefined, loops: number, onProgress: (seconds: number, displayDuration?: number) => void, onEnd: () => void, startAtSeconds = 0): Promise<MdrPlaybackInfo> {
+  async playMdr(mdr: ArrayBuffer, pdx: ArrayBuffer | undefined, loops: number, onProgress: (seconds: number, displayDuration?: number) => void, onEnd: () => void, startAtSeconds = 0, seeking = false): Promise<MdrPlaybackInfo> {
     this.stop();
     const playbackGeneration = this.playbackGeneration;
     const { context, gains } = this.graph;
     await context.resume();
     throwIfPlaybackSuperseded(playbackGeneration, this.playbackGeneration);
-    this.restoreMdrSoundFont();
     const sourceInfo = inspectMdr(mdr);
     if (!Number.isFinite(startAtSeconds) || startAtSeconds < 0) throw new Error("移動先の再生位置が不正です。");
-    if (startAtSeconds > 0 && sourceInfo.midiTracks > 0) throw new Error("MIDIを含むMDRの位置移動は未対応です。");
+    if ((seeking || startAtSeconds > 0) && sourceInfo.midiTracks > 0 && this.midiOutput) throw new Error("外部MIDI出力での位置移動は未対応です。");
     const mixerTracks = listMdrMixerTracks(mdr);
     const hardwareTracks = mixerTracks.filter((track) => track.active && track.engine !== "midi");
     this.mdrHardwareTrackIndexes = hardwareTracks.map((track) => track.index);
@@ -2843,10 +2872,9 @@ export class SignalDeckAudio {
       else onProgress(seconds);
     };
     const totalPlaybackDuration = resolveMdrPlaybackDuration(totalHardwareDuration, midiEvents, trustedFiniteMidiLoopWindow);
-    // First development stage: never seek a MIDI-bearing score without chasing
-    // its controllers, SysEx and voices. A real hardware render advances FM/PCM.
-    const seekable = needsHardwareRenderer && sourceInfo.midiTracks === 0 && midiEvents.length === 0;
-    if (startAtSeconds > 0 && !seekable) throw new Error("このMDRの位置移動は未対応です。");
+    const hasMidi = sourceInfo.midiTracks > 0 || midiEvents.length > 0;
+    const seekable = hasMidi ? Boolean(this.gsMidiPort && this.gsLoaded && !this.midiOutput) : needsHardwareRenderer;
+    if ((seeking || startAtSeconds > 0) && !seekable) throw new Error("このMDRの位置移動は未対応です。");
     const startOffset = loops > 0 ? Math.min(startAtSeconds, totalPlaybackDuration) : startAtSeconds;
     if (needsHardwareRenderer) {
       this.mdrPlayer!.start(loops);
@@ -2860,9 +2888,6 @@ export class SignalDeckAudio {
     // the block being rendered reaches the graph output. The callback itself
     // runs one ScriptProcessor block earlier, so using `currentTime` here makes
     // SoundFont MIDI start roughly one large buffer ahead on stable profiles.
-    const fallbackStartsAt = context.currentTime + (needsHardwareRenderer
-      ? resolveMdrPlaybackStartLatencySeconds(this.performanceProfile, context.sampleRate, context.outputLatency, context.baseLatency)
-      : 0.025);
     const trustedMidiLoopWindow = loops <= 0 ? trustedFiniteMidiLoopWindow : undefined;
     const infiniteMidiLoopWindow = loops <= 0
       ? trustedMidiLoopWindow ?? (() => {
@@ -2870,15 +2895,36 @@ export class SignalDeckAudio {
           return period ? { startSeconds: 0, endSeconds: period } : undefined;
         })()
       : undefined;
+    let midiPosition: MidiSeekPosition = { cursor: 0, cycle: 0 };
+    if (hasMidi && (seeking || startOffset > 0)) {
+      const assertCurrent = () => throwIfPlaybackSuperseded(playbackGeneration, this.playbackGeneration);
+      const apply = (messages: number[][]) => this.restoreMdrMidiSettings(messages, playbackGeneration);
+      // Begin with a deterministic GS baseline, including backward seeks to 0.
+      // Keep the gain muted and wait for worklet acknowledgement before audio starts.
+      await apply([GS_RESET]);
+      const events = infiniteMidiLoopWindow ? selectMdrMidiLoopWindowEvents(midiEvents, infiniteMidiLoopWindow) : midiEvents;
+      midiPosition = await chaseMidiBefore(events, startOffset, {
+        loopStartIndex: infiniteMidiLoopWindow ? events.findIndex(event => event.at >= infiniteMidiLoopWindow.startSeconds) : -1,
+        loopPeriod: infiniteMidiLoopWindow ? infiniteMidiLoopWindow.endSeconds - infiniteMidiLoopWindow.startSeconds : 0,
+        dispatchAt: at => resolveSoundFontMdrDispatchAtSeconds(at, this.soundFontMdrDelayMs),
+        skip: (event, cycle) => this.mutedMdrTracks.has(event.sourceTrack) || shouldSkipMdrMidiEventAtLoopCycle(event.bytes, cycle),
+        apply, assertCurrent,
+      });
+      assertCurrent();
+    }
+    this.restoreMdrSoundFont();
+    const fallbackStartsAt = context.currentTime + (needsHardwareRenderer
+      ? resolveMdrPlaybackStartLatencySeconds(this.performanceProfile, context.sampleRate, context.outputLatency, context.baseLatency)
+      : 0.025);
     let startsAt = fallbackStartsAt - startOffset;
     let midiTimelineStarted = false;
     let hardwareEndAt: number | undefined;
-    this.mdrAudioTimeline = needsHardwareRenderer && !this.midiOutput ? new MdrAudioTimeline(context.sampleRate) : undefined;
+    this.mdrAudioTimeline = needsHardwareRenderer && !this.midiOutput ? new MdrAudioTimeline(context.sampleRate, startOffset) : undefined;
     const startMidiTimeline = (audibleStartAt?: number) => {
       if (midiTimelineStarted) return;
       midiTimelineStarted = true;
       startsAt = (Number.isFinite(audibleStartAt) ? Math.max(context.currentTime, audibleStartAt as number) : fallbackStartsAt) - startOffset;
-      this.startMdrMidiTimeline(midiEvents, startsAt, infiniteMidiLoopWindow);
+      this.startMdrMidiTimeline(midiEvents, startsAt, infiniteMidiLoopWindow, midiPosition, needsHardwareRenderer);
     };
     if (needsHardwareRenderer) {
       const node = context.createScriptProcessor(resolveScriptProcessorBufferSize(this.performanceProfile), 0, 2);
@@ -2938,7 +2984,9 @@ export class SignalDeckAudio {
       if (!isCurrentPlaybackGeneration(playbackGeneration, this.playbackGeneration)) return;
       const hardwareMilliseconds = needsHardwareRenderer ? this.mdrPlayer?.getPlayAtMilliseconds() ?? null : null;
       const hardwareTerminated = needsHardwareRenderer && (this.mdrPlayer?.isTerminated() ?? false);
-      const elapsed = progressClock.read(context.currentTime - startsAt, hardwareMilliseconds, hardwareTerminated);
+      const elapsed = startOffset > 0
+        ? this.mdrAudioTimeline?.songSecondsAt(context.currentTime) ?? Math.max(startOffset, context.currentTime - startsAt)
+        : progressClock.read(context.currentTime - startsAt, hardwareMilliseconds, hardwareTerminated);
       const display = displayLoop
         ? resolvePlaybackDisplayPosition(elapsed, displayInfo.duration, displayLoop, finalDisplayPassEnd)
         : { elapsed: songInfo.duration > 0 && loops !== 1 ? elapsed % songInfo.duration : Math.min(songInfo.duration, elapsed), duration: songInfo.duration };
@@ -2954,9 +3002,10 @@ export class SignalDeckAudio {
       this.transportFrame = frame = requestAnimationFrame(animate);
     };
     this.transportFrame = frame = requestAnimationFrame(animate);
+    this.seekRequiresSoundFont = hasMidi;
     if (seekable) this.seekPlayback = seconds => {
       const target = playbackSeekTarget(seconds, displayedPosition, songPosition, displayDuration, loops > 0 ? totalPlaybackDuration : undefined);
-      return this.playMdr(mdr, pdx, loops, onProgress, onEnd, target);
+      return this.playMdr(mdr, pdx, loops, onProgress, onEnd, target, true);
     };
     // MXDRV may retain an intentional song loop after its runtime state is no
     // longer useful for a browser transport. A saturated hardware measurement

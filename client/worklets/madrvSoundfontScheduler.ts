@@ -30,6 +30,7 @@ type SchedulerOptions = {
   release(event: MadrvSoundfontMidi): void;
   stopAll(): void;
   report(timing: MadrvSoundfontTiming): void;
+  restored?(generation: number, requestId: number): void;
 };
 
 function isGeneration(value: unknown): value is number {
@@ -70,7 +71,7 @@ export class MadrvSoundfontScheduler {
   handle(message: unknown, receivedAt: number): boolean {
     if (!message || typeof message !== "object") return false;
     const data = message as Record<string, unknown>;
-    if (data.type !== "madrv-midi" && data.type !== "madrv-reset" && data.type !== "madrv-mute") return false;
+    if (data.type !== "madrv-midi" && data.type !== "madrv-reset" && data.type !== "madrv-mute" && data.type !== "madrv-restore") return false;
     if (!isGeneration(data.generation)) return true;
     if (data.type === "madrv-reset") {
       if (data.generation < this.generation) return true;
@@ -90,6 +91,19 @@ export class MadrvSoundfontScheduler {
       return true;
     }
     if (data.generation !== this.generation) return true;
+    if (data.type === "madrv-restore") {
+      // The caller waits for each bounded batch while the MIDI gain is muted.
+      // Never accept notes through this control path, even from a bad caller.
+      if (!isGeneration(data.requestId) || !Array.isArray(data.messages) || data.messages.length > 256) return true;
+      if (!data.messages.every(bytes => Array.isArray(bytes) && bytes.length > 0
+        && bytes.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+        && (bytes[0] & 0xf0) !== 0x80 && (bytes[0] & 0xf0) !== 0x90)) return true;
+      for (const bytes of data.messages) this.options.apply({
+        type: "madrv-midi", generation: this.generation, sourceTrack: 0, bytes, targetAt: receivedAt,
+      });
+      this.options.restored?.(this.generation, data.requestId);
+      return true;
+    }
     if (data.type === "madrv-mute") {
       if (!Array.isArray(data.tracks) || !data.tracks.every(isTrack)) return true;
       const muted = new Set(data.tracks);

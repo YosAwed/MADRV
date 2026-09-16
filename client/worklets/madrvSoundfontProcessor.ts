@@ -25,6 +25,7 @@ class MadrvSoundfontCore extends WorkletSynthesizerCore {
       release: event => this.synthesizer.processMessage(event.bytes, 0, { time: 0 }),
       stopAll: () => this.synthesizer.stopAllChannels(true),
       report: timing => port.postMessage(timing),
+      restored: (generation, requestId) => port.postMessage({ type: "madrv-restored", generation, requestId }),
     });
   }
 

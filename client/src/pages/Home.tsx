@@ -1853,9 +1853,9 @@ export default function Home() {
     return false;
   };
   const seekEnabled = isPlaying && !playbackLoading && Boolean(audioRef.current?.canSeek());
-  const seekUnavailableReason = !isPlaying ? "MDX／MIDIを含まないMDRの再生中に位置を移動できます。"
+  const seekUnavailableReason = !isPlaying ? "MDXまたは内蔵SoundFontを使うMDRの再生中に位置を移動できます。"
     : mode === "mml" ? "MMLの位置移動は未対応です。"
-    : "MIDIを含む曲の位置移動は未対応です。現在は再生位置の表示のみです。";
+    : "外部MIDI出力での位置移動は未対応です。内蔵SoundFontで再生してください。";
   const mmlTempo = useMemo(() => extractMmlInitialTempo(mml), [mml]);
   const estimatedBpm = mode === "mml" ? mmlTempo : timerBToEstimatedBpm(timerB ?? -1);
   const tempoSource = mode === "mml"

@@ -48,6 +48,8 @@ type EngineInternals = {
   gsLoaded: boolean;
   gsSynth: unknown;
   gsMidiPort?: { postMessage(message: unknown): void };
+  pendingMidiRestore?: { generation: number; requestId: number; resolve(): void };
+  midiOutput?: { send: ReturnType<typeof vi.fn> };
   mdrPlayer: unknown;
   mutedMdrTracks: Set<number>;
   playbackGeneration: number;
@@ -64,7 +66,7 @@ type EngineInternals = {
   isMdrMidiPlaybackDrained(): boolean;
 };
 
-function makeMdr() {
+function makeMdr(activeTrack = 0) {
   const title = new TextEncoder().encode("Termination regression\r\n\x1aNONE\0");
   const table = new Uint8Array(66);
   const tracks: number[] = [];
@@ -72,7 +74,8 @@ function makeMdr() {
   for (let index = 0; index < 32; index += 1) {
     table[2 + index * 2] = offset >> 8;
     table[3 + index * 2] = offset & 0xff;
-    const track = index === 0 ? [0xe0, 0xff, 0xe0, 0x08, 0x00, 0x80, 0x03, 0xf1, 0x00] : [0xf1, 0x00];
+    const track = index === activeTrack ? [0xe0, 0xff, 0xe0, 0x08, activeTrack >= 16 ? 0x80 : 0, 0x80, 0x03, 0xf1, 0x00]
+      : index === 0 ? [0xe0, 0xff, 0xf1, 0x00] : [0xf1, 0x00];
     tracks.push(...track);
     offset += track.length;
   }
@@ -307,14 +310,116 @@ describe("hardware-only seek transport", () => {
     h.engine.stop();
   });
 
-  it("leaves MIDI-bearing playback running when a seek is rejected", async () => {
+  it("leaves external MIDI playback running when a seek is rejected", async () => {
     const h = createHarness();
     h.hardware.duration = 10;
+    h.internal.midiOutput = { send: vi.fn() };
     midiFixture.events = [{ at: 1, sourceTrack: 16, bytes: [0x90, 60, 100] }];
     await h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn());
     expect(h.engine.canSeek()).toBe(false);
     const generation = h.internal.playbackGeneration;
     await expect(h.engine.seekTo(5)).rejects.toThrow("位置移動を利用できません");
+    expect(h.internal.playbackGeneration).toBe(generation);
+    h.engine.stop();
+  });
+
+  it.each([-500, 0, 500])("chases internal MIDI settings and resumes at the delayed boundary (%s ms)", async delayMs => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    h.engine.setSoundFontMdrDelayMs(delayMs);
+    const postMessage = vi.fn((message: any) => {
+      if (message.type === "madrv-restore") h.internal.pendingMidiRestore!.resolve();
+    });
+    h.internal.gsMidiPort = { postMessage };
+    midiFixture.events = [
+      { at: 0, sourceTrack: 16, bytes: [0xc0, 42] },
+      { at: 1, sourceTrack: 16, bytes: [0x90, 60, 100] },
+      { at: 2, sourceTrack: 16, bytes: [0xb0, 64, 127] },
+      { at: 5 - delayMs / 1000, sourceTrack: 16, bytes: [0x90, 62, 100] },
+      { at: 7, sourceTrack: 16, bytes: [0x80, 62, 0] },
+    ];
+    await h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn());
+    expect(h.engine.canSeek()).toBe(true);
+    await h.engine.seekTo(5);
+    const restores = postMessage.mock.calls.map(([m]) => m).filter(m => m.type === "madrv-restore");
+    expect(restores).toHaveLength(2);
+    expect(restores[1].messages).toEqual([[0xc0, 42], [0xb0, 64, 127]]);
+    h.process(0.1);
+    const notes = postMessage.mock.calls.map(([m]) => m).filter(m => m.type === "madrv-midi");
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ bytes: [0x90, 62, 100], targetAt: 0.1 });
+    await h.engine.seekTo(0);
+    expect(postMessage.mock.calls.map(([m]) => m).filter(m => m.type === "madrv-restore")).toHaveLength(3);
+    h.engine.stop();
+  });
+
+  it("cancels an unacknowledged MIDI restoration before reconnecting audio", async () => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    h.internal.gsMidiPort = { postMessage: vi.fn() };
+    midiFixture.events = [{ at: 8, sourceTrack: 16, bytes: [0x90, 60, 100] }];
+    await h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn());
+    h.node.connect.mockClear();
+    const pending = h.engine.seekTo(5);
+    const rejected = expect(pending).rejects.toThrow("中止");
+    for (let i = 0; i < 20 && !h.internal.pendingMidiRestore; i++) await Promise.resolve();
+    expect(h.internal.pendingMidiRestore).toBeDefined();
+    h.engine.stop();
+    await rejected;
+    expect(h.node.connect).not.toHaveBeenCalled();
+    expect(h.internal.pendingMidiRestore).toBeUndefined();
+  });
+
+  it("fails safely when the worklet never acknowledges and does not restart audio", async () => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    h.internal.gsMidiPort = { postMessage: vi.fn() };
+    midiFixture.events = [{ at: 8, sourceTrack: 16, bytes: [0x90, 60, 100] }];
+    await h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn());
+    h.node.connect.mockClear();
+    const pending = h.engine.seekTo(5);
+    const rejected = expect(pending).rejects.toThrow("タイムアウト");
+    await vi.advanceTimersByTimeAsync(5001);
+    await rejected;
+    expect(h.node.connect).not.toHaveBeenCalled();
+    expect(h.engine.canSeek()).toBe(false);
+    h.engine.stop();
+  });
+
+  it.each([false, true])("resumes late MIDI after hardware termination or a previous hardware song (GS only: %s)", async gsOnly => {
+    const h = createHarness();
+    h.hardware.duration = 1;
+    h.hardware.milliseconds = 1000;
+    h.hardware.terminated = true;
+    h.internal.gsMidiPort = { postMessage: vi.fn((message: any) => {
+      if (message.type === "madrv-restore") h.internal.pendingMidiRestore!.resolve();
+    }) };
+    midiFixture.events = [{ at: 5.5, sourceTrack: 16, bytes: [0x90, 60, 100] }];
+    const progress = vi.fn();
+    const ended = vi.fn();
+    await h.engine.playMdr(makeMdr(gsOnly ? 16 : 0), undefined, 1, progress, ended);
+    await h.engine.seekTo(5);
+    if (!gsOnly) h.process(0.1);
+    h.advance(800);
+    expect(progress.mock.calls.at(-1)![0]).toBeGreaterThan(5.5);
+    const sent = (h.internal.gsMidiPort.postMessage as ReturnType<typeof vi.fn>).mock.calls.map(([m]) => m).filter(m => m.type === "madrv-midi");
+    expect(sent.at(-1)?.bytes).toEqual([0x90, 60, 100]);
+    expect(ended).not.toHaveBeenCalled();
+    h.advance(2000);
+    expect(ended).toHaveBeenCalledOnce();
+  });
+
+  it("disables seeking if the active MIDI output is changed to an external device", async () => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    h.internal.gsMidiPort = { postMessage: vi.fn() };
+    midiFixture.events = [{ at: 8, sourceTrack: 16, bytes: [0x90, 60, 100] }];
+    await h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn());
+    expect(h.engine.canSeek()).toBe(true);
+    h.internal.midiOutput = { send: vi.fn() };
+    expect(h.engine.canSeek()).toBe(false);
+    const generation = h.internal.playbackGeneration;
+    await expect(h.engine.seekTo(0)).rejects.toThrow("位置移動を利用できません");
     expect(h.internal.playbackGeneration).toBe(generation);
     h.engine.stop();
   });

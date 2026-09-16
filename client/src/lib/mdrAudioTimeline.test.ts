@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { MdrAudioTimeline } from "./mdrAudioTimeline";
 
+it("maps a seek offset and the remaining MIDI tail without reintroducing skipped audio", () => {
+  const target = 12.000001;
+  const clock = new MdrAudioTimeline(48_000, target);
+  expect(clock.songSecondsAt(1)).toBe(target);
+  clock.recordBlock(5, 4800, true);
+  expect(clock.targetAt(target - 0.001)).toBeUndefined();
+  expect(clock.targetAt(target)).toBe(5);
+  expect(clock.targetAt(target + 0.5)).toBeCloseTo(5.5);
+  expect(clock.songSecondsAt(4.9)).toBe(target);
+  expect(clock.songSecondsAt(5.5)).toBeCloseTo(target + 0.5);
+  expect(clock.renderedSeconds).toBeCloseTo(target + 0.1);
+});
+
 describe("MdrAudioTimeline", () => {
   it("has no scheduling horizon before the first rendered block", () => {
     const clock = new MdrAudioTimeline(48_000);

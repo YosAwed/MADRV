@@ -1,5 +1,7 @@
 # 再生位置シークの開発・第1段階
 
+第2段階の内蔵SoundFont対応は [playback-seek-midi-2026-09-16.md](playback-seek-midi-2026-09-16.md) を参照。以下は第1段階時点の記録。
+
 開発ブランチ: `codex/playback-seek`。開始点は `main` の `97c5fcf`。本番へのデプロイ、リモートへのpushは実施しない。
 
 ## 実装範囲

@@ -29,7 +29,7 @@ export function PlaybackPosition({ elapsed, duration, enabled, busy, unavailable
   const progress = playbackProgressPercent(shown, duration);
   const valueText = `${time(shown)} / ${duration ? time(duration) : "--:--"}`;
   const title = busy ? "再生位置を移動しています。停止で中止できます。" : usable
-    ? "クリック、ドラッグ、矢印キーで現在の周回内を移動します。離した位置から再生します。"
+    ? "クリック、ドラッグ、矢印キーで現在の周回内を移動します。MIDIは移動先以降のノートから再開します。"
     : unavailableReason;
   return <span className="deck-inline-position" data-testid="playback-time-position">
     <span className="compact-clock" data-testid="playback-elapsed" aria-label="経過時間">{valueText}</span>
