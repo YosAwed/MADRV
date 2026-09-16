@@ -1,4 +1,5 @@
 import { CompactPanel, type CompactPanelHandle } from "@/components/CompactPanel";
+import { PlaybackPosition } from "@/components/PlaybackPosition";
 /* Compact Signal Deck: persistent playback controls and independently folding sections. */
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,7 @@ import {
   Waves,
 } from "lucide-react";
 import { ChangeEvent, DragEvent, lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { compileMml, extractMmlInitialTempo, fetchRemoteCatalog, fetchRemoteSoundFont, fetchSharedSoundFont, formatMidiNoteName, formatPdxFileName, inspectMadrvSource, inspectMdr, inspectMdx, isGoogleDriveShareUrl, isGsMidiEngineArmed, isMidiPlaybackDestinationReady, isOpmPcmEngineArmed, isPcmPdxEngineArmed, isPcmVoiceActive, isSafariBrowserUserAgent, isSignedTimingCorrectionDraft, limitScore, listMdrMixerTracks, mdrRequiresPdx, MdrInfo, MdrMixerTrack, MdxInfo, MidiDiagnosticEntry, MidiOutputDevice, MmlSyntaxError, normalizeExternalMidiAdvanceMs, normalizeRemoteAssetUrl, normalizeSoundFontMdrDelayMs, normalizeSoundFontMdrDelayProfiles, parseRemoteCatalogPayload, playbackProgressPercent, recommendPlaybackTuning, recommendSoundFontMdrDelayMs, RemoteCatalogEntry, requiresStableMadrvProfileForHybridTracks, requiresStableMadrvProfileForSoundFont, resolveNextPlaylistIndex, resolvePlaylistInterTrackSilenceSeconds, resolveSoundFontMdrDelayProfile, resolveSoundFontMdrSyncResidualMs, resolveSoundFontMdrTimingComparisonDelay, setSoundFontMdrDelayProfile, SignalDeckAudio, stepSoundFontMdrDelayMs, timerBToEstimatedBpm, updateSoundFontMdrDelayMeasurement, type MdrMidiSyncSnapshot, type MdrTrackKeyState, type PlaybackLoadProbe, type PlaybackPerformanceProfile, type PlaybackTuningPreset, type PlaybackTuningRecommendation, type SoundFontMdrDelayMeasurement, type SoundFontMdrDelayProfiles, type SoundFontMdrTimingComparisonMode } from "@/lib/madrvEngine";
+import { compileMml, extractMmlInitialTempo, fetchRemoteCatalog, fetchRemoteSoundFont, fetchSharedSoundFont, formatMidiNoteName, formatPdxFileName, inspectMadrvSource, inspectMdr, inspectMdx, isGoogleDriveShareUrl, isGsMidiEngineArmed, isMidiPlaybackDestinationReady, isOpmPcmEngineArmed, isPcmPdxEngineArmed, isPcmVoiceActive, isSafariBrowserUserAgent, isSignedTimingCorrectionDraft, limitScore, listMdrMixerTracks, mdrRequiresPdx, MdrInfo, MdrMixerTrack, MdxInfo, MidiDiagnosticEntry, MidiOutputDevice, MmlSyntaxError, normalizeExternalMidiAdvanceMs, normalizeRemoteAssetUrl, normalizeSoundFontMdrDelayMs, normalizeSoundFontMdrDelayProfiles, parseRemoteCatalogPayload, recommendPlaybackTuning, recommendSoundFontMdrDelayMs, RemoteCatalogEntry, requiresStableMadrvProfileForHybridTracks, requiresStableMadrvProfileForSoundFont, resolveNextPlaylistIndex, resolvePlaylistInterTrackSilenceSeconds, resolveSoundFontMdrDelayProfile, resolveSoundFontMdrSyncResidualMs, resolveSoundFontMdrTimingComparisonDelay, setSoundFontMdrDelayProfile, SignalDeckAudio, stepSoundFontMdrDelayMs, timerBToEstimatedBpm, updateSoundFontMdrDelayMeasurement, type MdrMidiSyncSnapshot, type MdrTrackKeyState, type PlaybackLoadProbe, type PlaybackPerformanceProfile, type PlaybackTuningPreset, type PlaybackTuningRecommendation, type SoundFontMdrDelayMeasurement, type SoundFontMdrDelayProfiles, type SoundFontMdrTimingComparisonMode } from "@/lib/madrvEngine";
 import { DEFAULT_PLAYLIST_LOOP_COUNT, isPersistablePlaylistEntry, movePlaylistEntry, normalizePlaylistLoopCount, parseSavedPlaylist, SAVED_PLAYLIST_STORAGE_KEY, setPlaylistEntryLoopCount, updateRemotePlaylistTitle, type SavedPlaylistEntry } from "@/lib/playlistEntries";
 import { parseRecentSources, RECENT_SOURCES_STORAGE_KEY, removeRecentSource, upsertRecentSource, type RecentSource } from "@/lib/recentSources";
 import { persistLocalSoundFontSelection, persistRemoteSoundFontSelection, readCachedLocalSoundFont, readPersistedSoundFontSelection } from "@/lib/soundFontStorage";
@@ -356,6 +357,7 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPreparingPlayback, setIsPreparingPlayback] = useState(false);
+  const [isSeeking, setIsSeeking] = useState(false);
   const [loadingSource, setLoadingSource] = useState<{ requestId: number; title: string; entryId?: string } | null>(null);
   const [playingPlaylistEntryId, setPlayingPlaylistEntryId] = useState<string | null>(null);
   const [playingPlaylistLoopCount, setPlayingPlaylistLoopCount] = useState(DEFAULT_PLAYLIST_LOOP_COUNT);
@@ -363,7 +365,7 @@ export default function Home() {
     try { return window.localStorage.getItem("madrv-player.fade-during-load-v1") === "true"; } catch { return false; }
   });
   const fadeDuringLoadRef = useRef(fadeDuringLoad);
-  const playbackLoading = loadingSource !== null || isPreparingPlayback;
+  const playbackLoading = loadingSource !== null || isPreparingPlayback || isSeeking;
   const [audioSampleRate, setAudioSampleRate] = useState(48_000);
   const [audioLatencyInfo, setAudioLatencyInfo] = useState({ sampleRate: 48_000, outputLatencySeconds: 0, baseLatencySeconds: 0 });
   const [soundFontMdrDelayMeasurement, setSoundFontMdrDelayMeasurement] = useState<SoundFontMdrDelayMeasurement | null>(null);
@@ -522,6 +524,7 @@ export default function Home() {
     }
     preparingRequestRef.current = null;
     setIsPreparingPlayback(false);
+    setIsSeeking(false);
     setRemoteLoading(false);
     setLoadingSource(null);
     audio().setLoadingFade(false);
@@ -553,6 +556,32 @@ export default function Home() {
     setPlayingPlaylistEntryId(null);
     setElapsed(0);
     setNotice("再生を停止しました。");
+  }
+
+  async function seekPlayback(seconds: number) {
+    if (playbackLoading || !isPlaying || !audioRef.current?.canSeek()) return;
+    const requestId = playlistStartRequestRef.current;
+    preparingRequestRef.current = requestId;
+    setIsSeeking(true);
+    setNotice(`${formatPlaybackTime(seconds)}へ移動しています。停止で中止できます。`);
+    try {
+      const info = await audio().seekTo(seconds);
+      if (requestId !== playlistStartRequestRef.current) return;
+      setDuration(info.duration);
+      setNotice(`${formatPlaybackTime(seconds)}から再生しています。`);
+    } catch (error) {
+      if (requestId !== playlistStartRequestRef.current) return;
+      audio().stop();
+      playlistRunRef.current = false;
+      setIsPlaying(false);
+      setPlayingPlaylistEntryId(null);
+      setNotice(error instanceof Error ? error.message : "再生位置を移動できませんでした。");
+    } finally {
+      if (requestId === playlistStartRequestRef.current) {
+        preparingRequestRef.current = null;
+        setIsSeeking(false);
+      }
+    }
   }
 
   function changeFadeDuringLoad(enabled: boolean) {
@@ -1823,8 +1852,10 @@ export default function Home() {
     if (engineId === "midi") return isGsMidiEngineArmed(isPlaying, mdrInfo?.midiTracks ?? 0, mmlEngineFlags.midi);
     return false;
   };
-  const transportElapsed = elapsed;
-  const transportProgress = playbackProgressPercent(transportElapsed, duration);
+  const seekEnabled = isPlaying && !playbackLoading && Boolean(audioRef.current?.canSeek());
+  const seekUnavailableReason = !isPlaying ? "MDX／MIDIを含まないMDRの再生中に位置を移動できます。"
+    : mode === "mml" ? "MMLの位置移動は未対応です。"
+    : "MIDIを含む曲の位置移動は未対応です。現在は再生位置の表示のみです。";
   const mmlTempo = useMemo(() => extractMmlInitialTempo(mml), [mml]);
   const estimatedBpm = mode === "mml" ? mmlTempo : timerBToEstimatedBpm(timerB ?? -1);
   const tempoSource = mode === "mml"
@@ -1866,19 +1897,13 @@ export default function Home() {
         <section className="compact-transport" aria-label="再生コントロール">
           <div className="flex items-center justify-between gap-2">
             <span className="mono program-deck-label">Program Deck</span>
-            <span data-testid="playback-state" role="status" className="mono inline-flex items-center gap-1.5 text-[11px] text-primary">{playbackLoading && <LoaderCircle size={12} className="animate-spin" />}{playbackLoading ? "LOADING" : isPlaying ? "PLAYING" : "READY"}</span>
+            <span data-testid="playback-state" role="status" className="mono inline-flex items-center gap-1.5 text-[11px] text-primary">{playbackLoading && <LoaderCircle size={12} className="animate-spin" />}{isSeeking ? "SEEKING" : playbackLoading ? "LOADING" : isPlaying ? "PLAYING" : "READY"}</span>
           </div>
           <div className="compact-title-row"><h1 data-testid="source-title" title={loadingSource?.title ?? sourceTitle}>{loadingSource?.title ?? sourceTitle}</h1></div>
           <div className="deck-playback-meta mono" data-testid="playback-meta">
             <div className="deck-time-row">
-            <span className="deck-inline-position" data-testid="playback-time-position">
-              <span className="compact-clock" data-testid="playback-elapsed" aria-label="経過時間">{formatPlaybackTime(elapsed)} / {duration ? formatPlaybackTime(duration) : "--:--"}</span>
-              <span className="deck-position-track" role="progressbar" aria-label="再生位置" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(transportProgress)} aria-valuetext={`${formatPlaybackTime(elapsed)} / ${duration ? formatPlaybackTime(duration) : "--:--"}（表示のみ）`} title="再生位置の表示です。ドラッグでの移動には対応していません。">
-                <span className="deck-position-fill" style={{ width: `${transportProgress}%` }} />
-                <span className="deck-position-marker" data-testid="playback-marker" style={{ left: `${transportProgress}%`, transition: isMobile ? "left 200ms linear" : undefined }} />
-              </span>
-              <span className="deck-position-percent">(<span data-testid="playback-position">{Math.round(transportProgress)}%</span>)</span>
-            </span>
+            <PlaybackPosition elapsed={elapsed} duration={duration} enabled={seekEnabled} busy={isSeeking}
+              unavailableReason={seekUnavailableReason} onSeek={seconds => void seekPlayback(seconds)} />
             <span className="compact-tempo" data-testid="playback-bpm">{estimatedBpm ? `${estimatedBpm.toFixed(1)} BPM` : "— BPM"}</span>
             </div>
             <div className="deck-playlist-row">

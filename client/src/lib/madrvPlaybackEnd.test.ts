@@ -110,6 +110,7 @@ function createHarness(sampleRate = 48_000) {
     getHardwareTrackMidiNote: vi.fn(() => null),
     getTimerB: vi.fn(() => 200),
     load: vi.fn(async () => ({ duration: hardware.duration, format: "MDR / OPM + PDX" })),
+    loadMdx: vi.fn(async () => ({ duration: hardware.duration, format: "MDX / OPM + PDX" })),
     measureDuration: vi.fn((loops: number) => hardware.duration * loops),
     renderInto: vi.fn(() => { if (hardware.terminateOnRender) hardware.terminated = true; return 0; }),
   };
@@ -178,6 +179,158 @@ describe("MDR playback clock at the hardware ending", () => {
     const clock = new MdrPlaybackClock();
     expect(clock.read(0, 42, true)).toBe(0);
     expect(clock.read(0.5, 42, true)).toBe(0.5);
+  });
+});
+
+describe("hardware-only seek transport", () => {
+  it("rebuilds MDX at the requested position and ends after the remaining duration", async () => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    const progress = vi.fn();
+    const ended = vi.fn();
+    await h.engine.playMdx(new ArrayBuffer(0), undefined, 1, progress, ended);
+    h.process(0);
+    h.advance(1000);
+    expect(h.engine.canSeek()).toBe(true);
+    h.player.renderInto.mockClear();
+    await h.engine.seekTo(8);
+    const skipped = h.player.renderInto.mock.calls.reduce((sum, args) => sum + (args[0] as Float32Array).length, 0);
+    expect(skipped).toBe(8 * 48_000);
+    expect(progress).toHaveBeenLastCalledWith(8);
+    h.process(h.context.currentTime);
+    h.advance(1900);
+    expect(ended).not.toHaveBeenCalled();
+    h.advance(400);
+    expect(ended).toHaveBeenCalledOnce();
+    expect(h.engine.canSeek()).toBe(false);
+    h.advance(15_000);
+    expect(ended).toHaveBeenCalledOnce();
+  });
+
+  it("preserves mute state and resets the display when seeking backwards to zero", async () => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    const progress = vi.fn();
+    await h.engine.playMdx(new ArrayBuffer(0), undefined, 1, progress, vi.fn());
+    h.engine.setMdrMutedTracks([0, 3]);
+    await h.engine.seekTo(8);
+    expect(h.player.setChannelMask).toHaveBeenLastCalledWith(9);
+    await h.engine.seekTo(0);
+    expect(progress).toHaveBeenLastCalledWith(0);
+    expect(h.player.setChannelMask).toHaveBeenLastCalledWith(9);
+    h.engine.stop();
+  });
+
+  it("seeks in the current pass without resetting the remaining finite loop count", async () => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    const ended = vi.fn();
+    await h.engine.playMdx(new ArrayBuffer(0), undefined, 3, vi.fn(), ended);
+    h.process(0);
+    h.advance(21_000);
+    h.player.renderInto.mockClear();
+    await h.engine.seekTo(8);
+    const skipped = h.player.renderInto.mock.calls.reduce((sum, args) => sum + (args[0] as Float32Array).length, 0);
+    expect(skipped).toBe(28 * 48_000);
+    expect(h.player.start).toHaveBeenLastCalledWith(3);
+    h.process(h.context.currentTime);
+    h.advance(2400);
+    expect(ended).toHaveBeenCalledOnce();
+  });
+
+  it("does not reconnect or publish progress when STOP supersedes seek preparation", async () => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    const progress = vi.fn();
+    const ended = vi.fn();
+    await h.engine.playMdx(new ArrayBuffer(0), undefined, 1, progress, ended);
+    let finishLoad!: (value: { duration: number; format: string }) => void;
+    h.player.loadMdx.mockImplementationOnce(() => new Promise(resolve => { finishLoad = resolve; }));
+    const pending = h.engine.seekTo(8);
+    await Promise.resolve();
+    h.engine.stop();
+    progress.mockClear();
+    h.node.connect.mockClear();
+    finishLoad({ duration: 10, format: "MDX / OPM + PDX" });
+    await expect(pending).rejects.toThrow("superseded");
+    h.advance(15_000);
+    expect(progress).not.toHaveBeenCalled();
+    expect(ended).not.toHaveBeenCalled();
+    expect(h.node.connect).not.toHaveBeenCalled();
+    expect(h.engine.canSeek()).toBe(false);
+  });
+
+  it("uses the shorter repeat length after an MDX intro and seeks within that pass", async () => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    h.player.measureDuration.mockImplementation(loops => 10 + (loops - 1) * 7);
+    const progress = vi.fn();
+    await h.engine.playMdx(new ArrayBuffer(0), undefined, 3, progress, vi.fn());
+    h.process(0);
+    h.advance(18_000);
+    expect(progress.mock.calls.at(-1)?.[1]).toBe(7);
+    h.player.renderInto.mockClear();
+    const info = await h.engine.seekTo(6);
+    const skipped = h.player.renderInto.mock.calls.reduce((sum, args) => sum + (args[0] as Float32Array).length, 0);
+    expect(skipped).toBe(23 * 48_000);
+    expect(info.duration).toBe(7);
+    expect(progress).toHaveBeenLastCalledWith(6, 7);
+    h.engine.stop();
+  });
+
+  it("waits for the final MDX audio block to reach output after a near-end seek", async () => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    const ended = vi.fn();
+    await h.engine.playMdx(new ArrayBuffer(0), undefined, 1, vi.fn(), ended);
+    await h.engine.seekTo(9.9);
+    h.hardware.terminateOnRender = true;
+    h.process(0.3, 8192);
+    h.advance(450);
+    expect(ended).not.toHaveBeenCalled();
+    h.advance(100);
+    expect(ended).toHaveBeenCalledOnce();
+  });
+
+  it("supports MDR with hardware tracks and no MIDI events", async () => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    const progress = vi.fn();
+    await h.engine.playMdr(makeMdr(), undefined, 1, progress, vi.fn());
+    expect(h.engine.canSeek()).toBe(true);
+    h.player.renderInto.mockClear();
+    await h.engine.seekTo(5);
+    const skipped = h.player.renderInto.mock.calls.reduce((sum, args) => sum + (args[0] as Float32Array).length, 0);
+    expect(skipped).toBe(5 * 48_000);
+    expect(progress).toHaveBeenLastCalledWith(5);
+    expect(h.synth.noteOn).not.toHaveBeenCalled();
+    h.engine.stop();
+  });
+
+  it("leaves MIDI-bearing playback running when a seek is rejected", async () => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    midiFixture.events = [{ at: 1, sourceTrack: 16, bytes: [0x90, 60, 100] }];
+    await h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn());
+    expect(h.engine.canSeek()).toBe(false);
+    const generation = h.internal.playbackGeneration;
+    await expect(h.engine.seekTo(5)).rejects.toThrow("位置移動を利用できません");
+    expect(h.internal.playbackGeneration).toBe(generation);
+    h.engine.stop();
+  });
+
+  it("silences callbacks left over from the old MDX position", async () => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    await h.engine.playMdx(new ArrayBuffer(0), undefined, 1, vi.fn(), vi.fn());
+    const stale = h.node.onaudioprocess!;
+    await h.engine.seekTo(5);
+    h.player.renderInto.mockClear();
+    const samples = new Float32Array(128).fill(1);
+    stale({ playbackTime: 0, outputBuffer: { getChannelData: () => samples } });
+    expect(h.player.renderInto).not.toHaveBeenCalled();
+    expect(samples.every(sample => sample === 0)).toBe(true);
+    h.engine.stop();
   });
 });
 
