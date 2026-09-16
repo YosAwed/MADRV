@@ -2,6 +2,8 @@
 
 開発ブランチ `codex/playback-seek` の第2段階。MDXシークについてはユーザーの検証で問題なしと確認済み。本番への反映は行わず、Cloudflare検証環境だけを更新する。
 
+コード `df3cc4b567b3` を検証環境へ配信済み。Cloudflare Version ID: `6cfc7577-f13b-4511-ac33-41854544689f`。更新前後で本番デプロイ履歴と公開HTML／JS／CSSのSHA-256が一致した。検証環境のコードとWorkletもローカルビルドに一致。
+
 ## 動作
 
 - OPM／PCM＋内蔵SoundFont、およびMIDIだけのMDRで位置移動を有効化。

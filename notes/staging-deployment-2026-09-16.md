@@ -5,8 +5,8 @@
 - URL: https://madrv-player-staging.madrv-player-web.workers.dev
 - Worker: `madrv-player-staging`
 - 配信ブランチ: `codex/playback-seek`
-- 配信コード: `fa2c4a8fd77b`（クリーンな作業ツリーからビルド）
-- Cloudflare Version ID: `7e47b20f-ade5-43e4-b58f-8e64aaa3c38b`
+- 配信コード: `df3cc4b567b3`（クリーンな作業ツリーからビルド、内蔵SoundFontのMDRシーク対応）
+- Cloudflare Version ID: `6cfc7577-f13b-4511-ac33-41854544689f`
 - 専用設定: `wrangler.staging.jsonc`
 - 専用出力先: `dist/staging/public`
 
@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | Worker | `madrv-player` | `madrv-player-staging` |
 | SessionStore namespace | `b0c23eaf7dfd49059535f41e5819c761` | `001cd29658c848a9b55b9fcbc17bef02` |
-| Cloudflare version | `15df1142-4b99-4c42-b7a0-622bd584babc` | `7e47b20f-ade5-43e4-b58f-8e64aaa3c38b` |
+| Cloudflare version | `15df1142-4b99-4c42-b7a0-622bd584babc` | `6cfc7577-f13b-4511-ac33-41854544689f` |
 
 作業前後で本番デプロイ履歴が完全一致し、HTMLとそこから参照されるJS・CSSのSHA-256も一致した。本番HTMLのSHA-256: `32df6eed6bbb71f20ee85f12715c2fd54ff78c4403511e675184959f40d83f1f`。
 
@@ -34,6 +34,8 @@ Gitのpushやコミットに連動した自動デプロイは設定していな�
 
 ## 確認結果
 
+- 内蔵SoundFontのMDRシークを追加して検証環境を更新。詳細・ローカル実音声検証は [playback-seek-midi-2026-09-16.md](playback-seek-midi-2026-09-16.md)。更新後も本番デプロイ履歴とHTML／JS／CSSのSHA-256が更新前と一致。
+- 更新後の検証HTML／JS／CSS／SoundFont Workletがローカルビルドと一致。公開URLの合成MDX検査も再度成功（24.035秒、12.0175秒へ移動、7.0175秒へ戻る、末尾で自然終了、ブラウザ例外0）。
 - 型チェック（通常・Cloudflare）、Wrangler dry run、検証用ビルド・デプロイ成功。
 - 配信HTML・JS・CSSがローカルの検証用ビルドと一致。
 - `build-info.json`に正しいブランチ・リビジョン・`dirty: false`を確認。
