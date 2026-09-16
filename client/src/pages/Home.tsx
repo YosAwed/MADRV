@@ -181,6 +181,15 @@ const KEYBOARD_BLACK_BORDER = "#1a1b18";
 const KEYBOARD_BLACK_HEIGHT_RATIO = 0.62;
 const KEYBOARD_BLACK_WIDTH_RATIO = 0.52;
 
+// Eight named notes cover extended chords while keeping busy MIDI buses readable.
+const KEYBOARD_NOTE_LABEL_LIMIT = 8;
+function summarizeKeyboardNotes(label: string): string {
+  const names = label.split(" ");
+  return names.length > KEYBOARD_NOTE_LABEL_LIMIT
+    ? `${names.slice(0, KEYBOARD_NOTE_LABEL_LIMIT).join(" ")} +${names.length - KEYBOARD_NOTE_LABEL_LIMIT}`
+    : label;
+}
+
 /** LIVE KEYBOARD: channel ON/OFF strip only (no merged piano). PCM is pad activity, not pitch. */
 const ChannelNoteState = memo(function ChannelNoteState({ tracks, trackKeyState, mutedTracks, pcmActivityMask }: { tracks: MdrMixerTrack[]; trackKeyState: MdrTrackKeyState; mutedTracks: number[]; pcmActivityMask: number }) {
   const muted = new Set(mutedTracks);
@@ -1951,7 +1960,7 @@ export default function Home() {
                         <p className={`mono m-0 text-[11px] font-medium ${meta.tone}`}>{meta.label}</p>
                         <p className="mono m-0 mt-0.5 text-[7px] uppercase tracking-[0.08em] text-[#8b9085]">{busTracks.length} ch{mutedBusCount ? ` · ${mutedBusCount}m` : ""}</p>
                       </div>
-                      <span className={`mono w-16 shrink-0 truncate text-center text-[11px] font-semibold leading-none tracking-tight ${lit ? "text-primary" : "text-[#6f746a]"}`} title={lit || "Awaiting"}>{lit || "·"}</span>
+                      <span className={`mono matrix-note-label text-[11px] font-semibold tracking-tight ${lit ? "text-primary" : "text-[#6f746a]"}`} title={lit || "Awaiting"}>{summarizeKeyboardNotes(lit) || "·"}</span>
                       {engine === "pcm" ? <div className="matrix-pcm-pads">{busTracks.map(track => {
                         const muted = mutedTracks.includes(track.index);
                         const active = !muted && isPcmVoiceActive(pcmActivityMask, track.pcmVoice ?? 1);
@@ -1971,7 +1980,7 @@ export default function Home() {
                     const lit = isPad ? "" : (!muted && keys.length > 0 ? keys.map((note) => formatMidiNoteName(note)).join(" ") : "");
                     return <div key={track.index} data-keyboard-engine={track.engine} data-testid={`keyboard-track-${track.index}`} className={`flex items-center gap-1.5 bg-[#11120f] px-1.5 py-1 ${muted ? "opacity-55" : ""}`}>
                       <p className={`mono m-0 w-[3.6rem] shrink-0 truncate text-[9px] font-medium ${tone}`} title={track.label}>{track.label}</p>
-                      <span className={`mono w-12 shrink-0 truncate text-center text-[11px] font-semibold leading-none tracking-tight ${muted ? "text-[#ff9b94]" : lit ? "text-primary" : "text-[#6f746a]"}`} title={lit || (muted ? "Muted" : isPad ? "Pad · live keyboard" : "Awaiting")}>{muted ? "MUTE" : isPad ? "PAD" : lit || "·"}</span>
+                      <span className={`mono matrix-note-label text-[11px] font-semibold tracking-tight ${muted ? "text-[#ff9b94]" : lit ? "text-primary" : "text-[#6f746a]"}`} title={lit || (muted ? "Muted" : isPad ? "Pad · live keyboard" : "Awaiting")}>{muted ? "MUTE" : isPad ? "PAD" : summarizeKeyboardNotes(lit) || "·"}</span>
                       {isPad
                         ? <div className="min-w-0 flex-1" aria-hidden="true" />
                         : <TrackFullKeyboard label={track.label} midiNotes={keys} muted={muted} />}

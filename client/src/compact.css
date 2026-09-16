@@ -931,8 +931,21 @@
   width: 64px;
   font-size: 14px;
 }
-.compact-deck.ui-dense [data-testid^="keyboard-track-"] > span {
-  width: 56px;
+.matrix-note-label {
+  width: 40ch;
+  max-width: 100%;
+  min-width: 0;
+  flex-shrink: 0;
+  white-space: nowrap;
+  height: 1.4em;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  line-height: 1.4;
+  text-align: left;
+}
+.matrix-note-label::-webkit-scrollbar {
+  display: none;
 }
 .compact-deck.ui-dense [data-testid^="keyboard-track-"] button {
   min-width: 30px;
@@ -946,11 +959,25 @@
   min-height: 42px;
 }
 @container deck-library (max-width: 1000px) {
+  .compact-deck.ui-dense .matrix-engine-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .compact-deck.ui-dense .matrix-engine-row > .matrix-note-label {
+    width: auto;
+  }
+  .compact-deck.ui-dense .matrix-engine-row > :is([data-testid="track-full-keyboard"], .matrix-pcm-pads) {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
   .compact-deck.ui-dense [data-testid^="keyboard-track-"] {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 6px 10px;
     padding: 8px;
+  }
+  .compact-deck.ui-dense [data-testid^="keyboard-track-"] > .matrix-note-label {
+    width: auto;
   }
   .compact-deck.ui-dense [data-testid^="keyboard-track-"] > [data-testid="track-full-keyboard"] {
     grid-column: 1 / -1;
