@@ -98,22 +98,20 @@ try {
     } else {
       assert.ok(listBox.y + listBox.height <= keysBox.y, `Playlist is not above keyboards at ${width}`);
     }
-    const keyScroll = page.getByTestId("keyboard-matrix-tracks");
-    const listScroll = page.getByTestId("playlist-entry-list");
-    const listTop = await listScroll.evaluate(el => el.scrollTop);
-    await keyScroll.evaluate(el => { el.scrollTop = el.scrollHeight; });
-    assert.equal(await listScroll.evaluate(el => el.scrollTop), listTop);
-    const keyTop = await keyScroll.evaluate(el => el.scrollTop);
-    assert.ok(keyTop > 0, "Full track list should scroll inside its panel");
-    await listScroll.evaluate(el => { el.scrollTop = el.scrollHeight; });
-    assert.equal(await keyScroll.evaluate(el => el.scrollTop), keyTop);
-    assert.ok(await listScroll.evaluate(el => el.scrollTop > 0));
-    await keyScroll.evaluate(el => { el.scrollTop = 0; });
-    await listScroll.evaluate(el => { el.scrollTop = 0; });
-    await page.screenshot({ path: `${out}/library-${width}.png`, fullPage: true });
+    for (const id of ["keyboard-matrix-tracks", "playlist-entry-list"]) {
+      const dimensions = await page.getByTestId(id).evaluate(el => ({
+        clientHeight: el.clientHeight, scrollHeight: el.scrollHeight,
+        maxHeight: getComputedStyle(el).maxHeight, overflowY: getComputedStyle(el).overflowY,
+      }));
+      assert.equal(dimensions.maxHeight, "none", `${id} has a height limit at ${width}`);
+      assert.equal(dimensions.overflowY, "visible", `${id} has internal scrolling at ${width}`);
+      assert.ok(dimensions.scrollHeight <= dimensions.clientHeight + 1, `${id} clips its content at ${width}`);
+    }
+    assert.ok(await page.evaluate(() => document.documentElement.scrollHeight > innerHeight), "Long content should extend the page");
+    await page.screenshot({ path: `${out}/library-${width}.png`, fullPage: false });
     report.viewports.push({ width, twoColumns: layout.width >= 740, playlist: listBox, keyboard: keysBox });
   }
-  report.checks.push("300 playlist entries and 32 tracks remain in independent scrolling panels; wide screens use two columns and narrow screens put playlist first");
+  report.checks.push("300 playlist entries and 32 tracks expand their panels vertically without internal scrolling; wide screens use two columns and narrow screens put playlist first");
 
   await page.setViewportSize({ width: 1366, height: 900 });
   await playlist.getByRole("button", { name: "Clear", exact: true }).click();

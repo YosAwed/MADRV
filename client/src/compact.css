@@ -270,10 +270,6 @@
 .compact-playlist {
   min-width: 0;
 }
-.compact-playlist > div:nth-child(2) {
-  max-height: 260px;
-  overflow-y: auto;
-}
 .compact-matrix {
   max-height: min(55vh, 500px);
   overflow: auto;
@@ -361,9 +357,6 @@
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 12px;
-}
-.deck-library-grid.has-playlist {
-  --library-scroll-height: clamp(180px, calc(100dvh - 580px), 420px);
 }
 .deck-library-grid > [data-panel="playlist"] {
   container: playlist-panel / inline-size;
@@ -453,10 +446,8 @@
 }
 .program-deck [data-testid="keyboard-matrix-tracks"],
 .program-deck [data-testid="keyboard-matrix-engines"] {
-  max-height: var(--library-scroll-height, clamp(180px, 35dvh, 420px));
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  scrollbar-gutter: stable;
+  max-height: none;
+  overflow: visible;
 }
 .program-deck [data-testid="track-full-keyboard"] > div {
   min-width: 0;
@@ -605,9 +596,8 @@
   min-width: 0;
 }
 .program-deck .compact-playlist > .playlist-entry-list {
-  max-height: var(--library-scroll-height, 440px);
-  overscroll-behavior-y: contain;
-  scrollbar-gutter: stable;
+  max-height: none;
+  overflow: visible;
 }
 .program-deck .compact-playlist-entry {
   padding: 10px 12px;
@@ -777,10 +767,6 @@
     grid-column: 1 / -1;
     justify-content: flex-end;
   }
-  .program-deck [data-testid="keyboard-matrix-tracks"],
-  .program-deck [data-testid="keyboard-matrix-engines"] {
-    max-height: 230px;
-  }
 }
 
 /* Readable controls and annotations at normal browser zoom. */
@@ -905,9 +891,6 @@
 }
 .compact-deck.ui-dense .deck-levels .compact-level > :last-child {
   font-size: 16px;
-}
-.deck-library-grid.has-playlist {
-  --library-scroll-height: clamp(280px, calc(100dvh - 560px), 520px);
 }
 .compact-deck.ui-dense [data-testid^="playlist-entry-title-"] {
   font-size: 16px;
