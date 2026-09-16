@@ -4,6 +4,7 @@ import { MdrAudioTimeline } from "./mdrAudioTimeline";
 it("maps a seek offset and the remaining MIDI tail without reintroducing skipped audio", () => {
   const target = 12.000001;
   const clock = new MdrAudioTimeline(48_000, target);
+  expect(clock.oldestSeconds).toBe(target);
   expect(clock.songSecondsAt(1)).toBe(target);
   clock.recordBlock(5, 4800, true);
   expect(clock.targetAt(target - 0.001)).toBeUndefined();
@@ -106,6 +107,7 @@ describe("MdrAudioTimeline", () => {
     expect(clock.targetAt(19.4)).toBeCloseTo(29.4, 12);
     expect(clock.targetAt(16.1)).toBeCloseTo(26.1, 12);
     expect(clock.targetAt(1)).toBeUndefined();
+    expect(clock.oldestSeconds).toBe(16);
     expect(clock.songSecondsAt(9)).toBe(0);
     expect(clock.songSecondsAt(29.5)).toBeCloseTo(19.5, 12);
   });

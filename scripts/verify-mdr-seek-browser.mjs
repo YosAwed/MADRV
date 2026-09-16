@@ -57,6 +57,7 @@ try {
       const originalTimeline = audio.startMdrMidiTimeline.bind(audio);
       audio.startMdrMidiTimeline = (events, ...args) => {
         state.lastScoreEventAt = events.at(-1)?.at ?? 0;
+        state.events = events;
         originalTimeline(events, ...args);
       };
       const originalSend = audio.sendMdrMidi.bind(audio);
@@ -65,8 +66,19 @@ try {
         originalSend(bytes, track, advance, scheduleAt);
       };
       const originalRestore = audio.restoreMdrMidiSettings.bind(audio);
+      let checkBankReplacement = false;
+      let bankChangeBlocked = false;
       audio.restoreMdrMidiSettings = async (messages, generation) => {
         await originalRestore(messages, generation);
+        if (checkBankReplacement) {
+          checkBankReplacement = false;
+          // The ACK has arrived, but the full seek preparation still owns the
+          // bank. A replacement must fail before any new bank is initialized.
+          const previousSynth = audio.gsSynth;
+          try { await audio.loadSoundFontData(new ArrayBuffer(8)); }
+          catch (error) { bankChangeBlocked = String(error).includes("再生を停止してからSoundFontを変更"); }
+          if (!bankChangeBlocked || audio.gsSynth !== previousSynth) throw new Error("Bank replacement was allowed between restore batches");
+        }
         state.restored.push(...messages);
       };
       const analyser = audio.context.createAnalyser();
@@ -101,6 +113,22 @@ try {
       if (afterProgress < offset + 2 || afterProgress > offset + 4) throw new Error("Seek clock failed to advance: " + afterProgress);
       if (count === 0 || midiPeak < 0.00001 || settings < 2) throw new Error("No MIDI playback after seek");
       if (state.restored.some(bytes => [0x80, 0x90].includes(bytes[0] & 0xf0))) throw new Error("Old notes replayed while chasing");
+      // Select an actual score note whose new deadline will fall before the
+      // seek point when A/B changes +500ms to zero before the first audio block.
+      const boundaryNote = state.events.find(event => event.at >= 1 && event.at < info.duration - 3
+        && (event.bytes[0] & 0xf0) === 0x90 && event.bytes[2] > 0);
+      if (!boundaryNote) throw new Error("Fixture has no note for the correction regression");
+      audio.setSoundFontMdrDelayMs(500);
+      checkBankReplacement = true;
+      await audio.seekTo(boundaryNote.at + 0.25);
+      audio.setSoundFontMdrDelayMs(0);
+      const correctionGeneration = audio.playbackGeneration;
+      peak = 0;
+      await wait(2000);
+      const correctionEvents = state.sent.filter(event => event.generation === correctionGeneration);
+      const correctionPeak = peak;
+      if (!correctionEvents.some(event => event.bytes.join(",") === boundaryNote.bytes.join(","))
+        || correctionPeak < 0.00001) throw new Error("MIDI stalled after live correction at the seek boundary");
       await audio.seekTo(0);
       if (state.progress.at(-1) !== 0) throw new Error("Home did not reset position");
       await wait(350);
@@ -129,7 +157,8 @@ try {
       audio.stop();
       clearInterval(timer);
       return { info, offset, preparationMs, startProgress, afterProgress, midiPeak,
-        midiEvents: count, settings, loopProgress, loopSent, endCount: state.endCount };
+        midiEvents: count, settings, correctionEvents: correctionEvents.length, correctionPeak,
+        bankChangeBlocked, loopProgress, loopSent, endCount: state.endCount };
     }, { profile, hasPdx: Boolean(pdxPath) });
     console.log(JSON.stringify({ profile, ...result, errors }));
     if (errors.length) throw new Error("Browser exceptions: " + errors.join(", "));

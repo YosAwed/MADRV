@@ -1863,6 +1863,7 @@ export class SignalDeckAudio {
   private gsMidiPort?: MessagePort;
   private midiRestoreRequestId = 0;
   private pendingMidiRestore?: { generation: number; requestId: number; resolve(): void; reject(error: Error): void };
+  private mdrPreparationGeneration?: number;
   private mdrMidiSchedulingStats: MdrMidiSchedulingStats | null = null;
   private mdrMidiMuteVersions = new Map<number, number>();
   /** Keyboard telemetry follows playback time even when audio is reserved a full block ahead. */
@@ -2404,7 +2405,8 @@ export class SignalDeckAudio {
   }
 
   private assertSoundFontCanBeReplaced() {
-    if (this.mdrNode || this.mdrWorklet || this.mdrMidiPump || !this.isMdrMidiPlaybackDrained()) {
+    if (this.mdrPreparationGeneration !== undefined || this.pendingMidiRestore
+      || this.mdrNode || this.mdrWorklet || this.mdrMidiPump || !this.isMdrMidiPlaybackDrained()) {
       throw new Error("予約済みの音を失わないよう、再生を停止してからSoundFontを変更してください。");
     }
   }
@@ -2670,9 +2672,17 @@ export class SignalDeckAudio {
         mostRecentDispatchAt = hardwareOutput
           ? resolveExternalMidiDispatchAtSeconds(eventAt, this.externalMidiAdvanceMs, hardwareOutput)
           : resolveSoundFontMdrDispatchAtSeconds(eventAt, this.soundFontMdrDelayMs);
-        const targetAt = outputTimeline
+        let targetAt = outputTimeline
           ? outputTimeline.targetAt(mostRecentDispatchAt)
           : resolveMdrMidiLiveTargetAtSeconds(context.currentTime, hardwareElapsed, mostRecentDispatchAt);
+        if (outputTimeline && targetAt === undefined && mostRecentDispatchAt < outputTimeline.oldestSeconds) {
+          // A live correction can move an unsent event before the seek point
+          // (or retained history). Catch it up in order instead of waiting for
+          // an audio block that will never exist. Hold for the first audible
+          // block when it is still buffered; future events keep their deadlines.
+          const firstOutputAt = outputTimeline.targetAt(outputTimeline.oldestSeconds);
+          if (firstOutputAt !== undefined) targetAt = Math.max(context.currentTime, firstOutputAt);
+        }
         if (targetAt === undefined || ((!outputTimeline || outputTimeline.ended) && mostRecentDispatchAt > hardwareElapsed + lookaheadSeconds)) {
           cursor -= 1;
           break;
@@ -2718,6 +2728,7 @@ export class SignalDeckAudio {
 
   stop() {
     this.playbackGeneration += 1;
+    this.mdrPreparationGeneration = undefined;
     this.pendingMidiRestore?.reject(new Error("再生位置の移動を中止しました。"));
     this.seekPlayback = undefined;
     this.seekRequiresSoundFont = false;
@@ -2791,6 +2802,19 @@ export class SignalDeckAudio {
 
   async playMdr(mdr: ArrayBuffer, pdx: ArrayBuffer | undefined, loops: number, onProgress: (seconds: number, displayDuration?: number) => void, onEnd: () => void, startAtSeconds = 0, seeking = false): Promise<MdrPlaybackInfo> {
     this.stop();
+    const generation = this.playbackGeneration;
+    // Own the bank throughout loading, silent rendering and every restore
+    // batch, including gaps with no pending worklet acknowledgement.
+    this.mdrPreparationGeneration = generation;
+    try {
+      return await this.prepareMdrPlayback(mdr, pdx, loops, onProgress, onEnd, startAtSeconds, seeking);
+    } finally {
+      // A cancelled preparation must not unlock its replacement's bank.
+      if (this.mdrPreparationGeneration === generation) this.mdrPreparationGeneration = undefined;
+    }
+  }
+
+  private async prepareMdrPlayback(mdr: ArrayBuffer, pdx: ArrayBuffer | undefined, loops: number, onProgress: (seconds: number, displayDuration?: number) => void, onEnd: () => void, startAtSeconds: number, seeking: boolean): Promise<MdrPlaybackInfo> {
     const playbackGeneration = this.playbackGeneration;
     const { context, gains } = this.graph;
     await context.resume();

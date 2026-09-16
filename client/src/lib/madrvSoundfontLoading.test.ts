@@ -57,6 +57,8 @@ type EngineInternals = {
   gsMidiPort: unknown;
   playbackGeneration: number;
   mutedMdrTracks: Set<number>;
+  pendingMidiRestore?: { resolve(): void };
+  restoreMdrMidiSettings(messages: number[][], generation: number): Promise<void>;
   startMdrMidiTimeline(events: readonly ScheduledMdrMidiEvent[], startsAt: number): void;
 };
 
@@ -102,6 +104,38 @@ afterEach(() => {
 });
 
 describe("SoundFont replacement transaction", () => {
+  it("rejects a new bank during seek restoration without destroying the responding synth", async () => {
+    const h = harness();
+    const restore = h.internals.restoreMdrMidiSettings([[0xc0, 42]], 0);
+    await expect(h.engine.loadSoundFontData(new ArrayBuffer(8))).rejects.toThrow("再生を停止してからSoundFontを変更");
+    expect(synthFactory.created).toHaveLength(0);
+    expect(h.oldSynth.destroy).not.toHaveBeenCalled();
+    h.internals.pendingMidiRestore!.resolve();
+    await restore;
+    expect(h.internals.pendingMidiRestore).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(5001);
+  });
+
+  it("rejects an already-loading bank if seek restoration starts before replacement commits", async () => {
+    const h = harness();
+    const plan = nextSynth();
+    const loading = h.engine.loadSoundFontData(new ArrayBuffer(8));
+    plan.ready.resolve();
+    await plan.started.promise;
+    const preparedSynth = synthFactory.created[0];
+    const restore = h.internals.restoreMdrMidiSettings([[0xc0, 42]], 0);
+    const rejected = expect(loading).rejects.toThrow("再生を停止してからSoundFontを変更");
+    plan.bank.resolve();
+    await rejected;
+    expect(h.internals.gsSynth).toBe(h.oldSynth);
+    expect(h.internals.gsMidiPort).toBe(h.oldPort);
+    expect(h.oldSynth.destroy).not.toHaveBeenCalled();
+    expect(preparedSynth.destroy).toHaveBeenCalledOnce();
+    h.internals.pendingMidiRestore!.resolve();
+    await restore;
+    await vi.advanceTimersByTimeAsync(5001);
+  });
+
   it("rejects replacement when playback starts during async preparation, preserving the old synth and its reservations", async () => {
     const h = harness();
     const plan = nextSynth();

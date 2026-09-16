@@ -21,6 +21,7 @@ export class MdrAudioTimeline {
 
   get ready(): boolean { return this.blocks.length > 0; }
   get ended(): boolean { return this.terminated; }
+  get oldestSeconds(): number { return this.startSeconds + (this.blocks[0]?.startFrame ?? 0) / this.sampleRate; }
   get renderedSeconds(): number { return this.startSeconds + this.outputFrames / this.sampleRate; }
 
   /** Each timestamp belongs to the beginning of this output block, not to when its callback runs. */

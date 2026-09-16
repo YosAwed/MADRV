@@ -49,6 +49,8 @@ type EngineInternals = {
   gsSynth: unknown;
   gsMidiPort?: { postMessage(message: unknown): void };
   pendingMidiRestore?: { generation: number; requestId: number; resolve(): void };
+  mdrPreparationGeneration?: number;
+  assertSoundFontCanBeReplaced(): void;
   midiOutput?: { send: ReturnType<typeof vi.fn> };
   mdrPlayer: unknown;
   mutedMdrTracks: Set<number>;
@@ -368,6 +370,83 @@ describe("hardware-only seek transport", () => {
     await rejected;
     expect(h.node.connect).not.toHaveBeenCalled();
     expect(h.internal.pendingMidiRestore).toBeUndefined();
+  });
+
+  it.each([0, 1])("continues ordered MIDI after an A/B timing change following a seek (%s blocks rendered)", async initialBlocks => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    h.engine.setSoundFontMdrDelayMs(500);
+    const postMessage = vi.fn((message: any) => {
+      if (message.type === "madrv-restore") h.internal.pendingMidiRestore!.resolve();
+    });
+    h.internal.gsMidiPort = { postMessage };
+    midiFixture.events = [
+      { at: 4.6, sourceTrack: 16, bytes: [0xc0, 42] },
+      { at: 4.6, sourceTrack: 16, bytes: [0x90, 60, 100] },
+      { at: 5.2, sourceTrack: 16, bytes: [0x80, 60, 0] },
+      { at: 5.4, sourceTrack: 16, bytes: [0x90, 64, 100] },
+      { at: 6, sourceTrack: 16, bytes: [0x80, 64, 0] },
+    ];
+    await h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn());
+    await h.engine.seekTo(5);
+    if (initialBlocks) { h.process(0.1); h.advance(43); }
+    h.engine.setSoundFontMdrDelayMs(0);
+    const sent = () => postMessage.mock.calls.map(([m]) => m).filter(m => m.type === "madrv-midi");
+    expect(sent()).toHaveLength(0);
+    h.process(0.1 + initialBlocks * 2048 / 48000);
+    // Expired settings/notes join the first audible block, in score order.
+    // Future note-offs must still wait for their own rendered audio blocks.
+    expect(sent().map(m => m.bytes)).toEqual(midiFixture.events.slice(0, 2).map(e => e.bytes));
+    expect(sent().map(m => m.targetAt)).toEqual([0.1, 0.1]);
+    for (let i = initialBlocks + 1; i < 50; i++) { h.process(0.1 + i * 2048 / 48000); h.advance(43); }
+    expect(sent().map(m => m.bytes)).toEqual(midiFixture.events.map(e => e.bytes));
+    expect(sent().at(-1).targetAt).toBeCloseTo(1.1);
+    expect(h.internal.mdrMidiTimelineComplete).toBe(true);
+    h.engine.stop();
+  });
+
+  it("blocks bank replacement throughout preparation and preserves the newer preparation after cancellation", async () => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    const result = { duration: 10, format: "MDR / OPM + PDX" };
+    let finishFirst!: (value: typeof result) => void;
+    let finishSecond!: (value: typeof result) => void;
+    h.player.load.mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve; }));
+    h.player.load.mockImplementationOnce(() => new Promise(resolve => { finishSecond = resolve; }));
+    const first = h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn(), 5);
+    const cancelled = expect(first).rejects.toThrow();
+    while (!finishFirst) await Promise.resolve();
+    expect(h.internal.pendingMidiRestore).toBeUndefined();
+    await expect(h.engine.loadSoundFontData(new ArrayBuffer(8))).rejects.toThrow("再生を停止してからSoundFontを変更");
+    const second = h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn(), 6);
+    while (!finishSecond) await Promise.resolve();
+    finishFirst(result);
+    await cancelled;
+    expect(h.internal.mdrPreparationGeneration).toBe(h.internal.playbackGeneration);
+    expect(() => h.internal.assertSoundFontCanBeReplaced()).toThrow("再生を停止してからSoundFontを変更");
+    finishSecond(result);
+    await second;
+    expect(h.internal.mdrPreparationGeneration).toBeUndefined();
+    h.engine.stop();
+    expect(() => h.internal.assertSoundFontCanBeReplaced()).not.toThrow();
+  });
+
+  it("releases the bank guard on preparation failure or STOP while preparation is pending", async () => {
+    const h = createHarness();
+    h.context.resume.mockRejectedValueOnce(new Error("resume failed"));
+    await expect(h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn())).rejects.toThrow("resume failed");
+    expect(h.internal.mdrPreparationGeneration).toBeUndefined();
+    expect(() => h.internal.assertSoundFontCanBeReplaced()).not.toThrow();
+    let resume!: () => void;
+    h.context.resume.mockImplementationOnce(() => new Promise(resolve => { resume = resolve; }));
+    const pending = h.engine.playMdr(makeMdr(), undefined, 1, vi.fn(), vi.fn());
+    const cancelled = expect(pending).rejects.toThrow();
+    expect(h.internal.mdrPreparationGeneration).toBe(h.internal.playbackGeneration);
+    h.engine.stop();
+    expect(h.internal.mdrPreparationGeneration).toBeUndefined();
+    expect(() => h.internal.assertSoundFontCanBeReplaced()).not.toThrow();
+    resume();
+    await cancelled;
   });
 
   it("fails safely when the worklet never acknowledges and does not restart audio", async () => {
