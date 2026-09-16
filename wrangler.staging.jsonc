@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "madrv-player-staging",
+  "account_id": "349436871b6d236eb4ede3c2c625770f",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2026-08-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist/staging/public",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "SESSIONS", "class_name": "SessionStore" }]
+  },
+  "exports": {
+    "SessionStore": { "type": "durable-object", "storage": "sqlite" }
+  },
+  "observability": { "enabled": true, "head_sampling_rate": 1 }
+}

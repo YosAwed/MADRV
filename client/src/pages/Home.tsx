@@ -1876,6 +1876,9 @@ export default function Home() {
 
   return (
     <div className="ui-dense compact-deck relative min-h-screen">
+      {import.meta.env.MODE === "staging" && <div data-testid="staging-banner" role="note" className="border-b border-amber-400/60 bg-amber-400/10 px-4 py-2 text-center text-xs text-amber-200">
+        <strong>検証環境</strong> · {import.meta.env.VITE_BUILD_BRANCH} · {import.meta.env.VITE_BUILD_REVISION} — 本番とは別の環境です
+      </div>}
       <header className="relative z-10 border-b border-white/10 bg-[#11120f]/85 backdrop-blur-xl">
         <div className="compact-header mx-auto max-w-[1600px] px-4 sm:px-6">
           <div className="compact-brand flex items-center gap-3">

@@ -33,6 +33,22 @@ pnpm build:cloudflare
 pnpm deploy:cloudflare   # requires Cloudflare Wrangler auth
 ```
 
+### Development staging (Cloudflare)
+
+On a `codex/` development branch, use the separate staging commands:
+
+```sh
+pnpm check:staging       # build + Wrangler dry run; no upload
+pnpm deploy:staging      # build + deploy madrv-player-staging only
+```
+
+`wrangler.staging.jsonc` uses its own Worker and session Durable Object namespace,
+with assets built into `dist/staging/public`. The deployed UI shows a staging
+banner with the branch and revision; `/build-info.json` identifies the build.
+Production remains configured by `wrangler.jsonc` and `deploy:cloudflare`.
+Deployments are manual; pushing a branch does not update staging automatically.
+The staging URL is public but marked `noindex` (this is not access control).
+
 ### GS MIDI playback
 
 MDR/MDX scores with GS MIDI tracks need either:
