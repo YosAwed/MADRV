@@ -1095,7 +1095,9 @@ type MadrvWasmFactory = (options?: { locateFile?: (file: string) => string }) =>
 const CONVERTER_MODULE_URL = "/manus-storage/madrv-converter-v4_28935c58.mjs";
 const CONVERTER_WASM_URL = "/manus-storage/madrv-converter-v4_f7f66741.wasm";
 const PLAYER_MODULE_URL = "/manus-storage/madrv-mdx-player-v12_fde3ce0c.mjs";
-const PLAYER_WASM_URL = "/manus-storage/madrv-mdx-player-v12_2d6b7625.wasm";
+// v13 keeps the v12 ABI and discards masked PCM key-ons when unmuting.
+// MDR and MDX playback share this core.
+const PLAYER_WASM_URL = "/manus-storage/madrv-mdx-player-v13_6e789f63.wasm";
 const MIDI_EVENTS_MODULE_URL = "/manus-storage/madrv-midi-events-v4_b2d6bf6b.mjs";
 const MIDI_EVENTS_WASM_URL = "/manus-storage/madrv-midi-events-v4_2facde2d.wasm";
 const SPESSA_PROCESSOR_URL = "/manus-storage/madrv-spessasynth-processor.js";
