@@ -35,11 +35,14 @@ pnpm deploy:cloudflare   # requires Cloudflare Wrangler auth
 
 ### Development staging (Cloudflare)
 
+URL: https://madrv-player-staging.madrv-player-web.workers.dev
+
 On a `codex/` development branch, use the separate staging commands:
 
 ```sh
 pnpm check:staging       # build + Wrangler dry run; no upload
 pnpm deploy:staging      # build + deploy madrv-player-staging only
+node scripts/verify-staging-browser.mjs  # public smoke test using generated MDX
 ```
 
 `wrangler.staging.jsonc` uses its own Worker and session Durable Object namespace,
