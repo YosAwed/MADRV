@@ -29,3 +29,13 @@ The staging account ID remains as a destination identifier and deployment guard,
 The pre-deployment production history reports latest version `f6e5768a-10ac-444b-9ee7-264362fff9e9`, uploaded at `2026-09-16T07:12:34.352Z`. This is the baseline for this follow-up, superseding earlier notes' production baseline.
 
 The quarantined `_to_delete/` directory was retained and excluded using local `.git/info/exclude`; none of its contents were committed.
+
+## Staging verification
+
+- Pushed implementation revision `a630bcdb2e95` to `origin/codex/playback-seek` and deployed its clean build to `madrv-player-staging`.
+- Cloudflare staging version: `d4afa3b0-3c59-4991-a7f9-fb1f47235ff6`.
+- Public `build-info.json` returned HTTP 200 and the expected revision with `dirty: false`. `/`, `/robots.txt` and `/build-info.json` all returned `X-Robots-Tag: noindex, nofollow, noarchive`; robots.txt also contains `Disallow: /`.
+- Public browser smoke test used generated 163-byte MDX only: duration 24.035 s, click to 12.0175 s, ArrowLeft to 7.0175 s, End to READY; no page errors.
+- Production deployment history before and after staging deployment was identical, including latest version `f6e5768a-10ac-444b-9ee7-264362fff9e9`. No production deployment was performed.
+
+This deployment record is a documentation-only commit after the deployed implementation revision.
