@@ -2866,7 +2866,8 @@ export class SignalDeckAudio {
     // Duration probing mutates the renderer: finish every measurement before
     // start(), otherwise infinite playback can leave OPM/PCM silent.
     const hardwareCycleSeconds = needsHardwareRenderer && (loops !== 1 || Boolean(midiTimeline.loopWindow))
-      ? resolveMdrHardwareLoopCycleSeconds(info.duration, this.mdrPlayer!.measureDuration(2))
+      ? resolveMdrHardwareLoopCycleSeconds(info.duration,
+        measuredLoops === 2 ? totalHardwareDuration : this.mdrPlayer!.measureDuration(2))
       : undefined;
     const trustedSongMidiLoopWindow = resolveTrustedMdrMidiLoopWindow(
       songMidiTimeline.loopWindow,
@@ -3065,8 +3066,10 @@ export class SignalDeckAudio {
     return { ...displayInfo, duration: displayDuration };
   }
 
-  async playMdx(mdx: ArrayBuffer, pdx: ArrayBuffer | undefined, loops: number, onProgress: (seconds: number, displayDuration?: number) => void, onEnd: () => void, startAtSeconds = 0): Promise<MdrPlaybackInfo> {
-    const mutedTracks = Array.from(this.mutedMdrTracks);
+  async playMdx(mdx: ArrayBuffer, pdx: ArrayBuffer | undefined, loops: number, onProgress: (seconds: number, displayDuration?: number) => void, onEnd: () => void, startAtSeconds = 0, seeking = false): Promise<MdrPlaybackInfo> {
+    // New playback starts with every track audible; only transport seeking
+    // carries the current mix across the renderer reload (including seek to 0).
+    const mutedTracks = seeking ? Array.from(this.mutedMdrTracks) : [];
     this.stop();
     if (!Number.isFinite(startAtSeconds) || startAtSeconds < 0) throw new Error("移動先の再生位置が不正です。");
     this.mdrHardwareTrackIndexes = Array.from({ length: 16 }, (_, index) => index);
@@ -3149,7 +3152,7 @@ export class SignalDeckAudio {
     this.transportFrame = frame = requestAnimationFrame(animate);
     this.seekPlayback = seconds => {
       const target = playbackSeekTarget(seconds, displayedPosition, songPosition, displayDuration, loops > 0 ? totalPlaybackDuration : undefined);
-      return this.playMdx(mdx, pdx, loops, onProgress, onEnd, target);
+      return this.playMdx(mdx, pdx, loops, onProgress, onEnd, target, true);
     };
     if (loops > 0) {
       const checkEnd = () => {

@@ -28,10 +28,16 @@ try {
     const { SignalDeckAudio } = await import(moduleUrl);
     window.seekChecks = { count: 0 };
     const original = SignalDeckAudio.prototype.seekTo;
-    SignalDeckAudio.prototype.seekTo = function (seconds) {
+    SignalDeckAudio.prototype.seekTo = async function (seconds) {
       window.seekChecks.count++;
       window.seekChecks.engine = this;
-      return original.call(this, seconds);
+      const result = await original.call(this, seconds);
+      // Hold completion, not engine startup, so STOP cannot revive playback.
+      if (window.seekChecks.hold) {
+        window.seekChecks.hold = false;
+        await new Promise(resolve => { window.seekChecks.release = resolve; });
+      }
+      return result;
     };
   });
   const settings = page.getByTestId("settings-toggle");
@@ -51,17 +57,29 @@ try {
   await page.mouse.move(bounds.x + bounds.width * 0.4, bounds.y + bounds.height / 2, { steps: 8 });
   assert.equal(await page.evaluate(() => window.seekChecks.count), 0, "Dragging must not repeatedly seek");
   await page.mouse.up();
-  await page.waitForFunction(() => window.seekChecks.count === 1 && !document.querySelector('[data-testid="playback-seek"]').disabled);
+  await page.waitForFunction(() => window.seekChecks.count === 1 && document.querySelector('[data-testid="playback-state"]').textContent === "PLAYING");
   const forward = Number(await slider.inputValue());
   assert.ok(Math.abs(forward / duration - 0.4) < 0.08, `Forward position: ${forward}/${duration}`);
   await slider.press("ArrowLeft");
-  await page.waitForFunction(() => window.seekChecks.count === 2 && !document.querySelector('[data-testid="playback-seek"]').disabled);
+  await page.waitForFunction(() => window.seekChecks.count === 2 && document.querySelector('[data-testid="playback-state"]').textContent === "PLAYING");
   const backward = Number(await slider.inputValue());
   assert.ok(backward < forward - 3, "Keyboard seek must move backwards");
   await page.screenshot({ path: "/tmp/madrv-playback-seek-playing.png", fullPage: true });
   await slider.press("Home");
-  await page.waitForFunction(() => window.seekChecks.count === 3 && !document.querySelector('[data-testid="playback-seek"]').disabled);
+  await page.waitForFunction(() => window.seekChecks.count === 3 && document.querySelector('[data-testid="playback-state"]').textContent === "PLAYING");
   assert.ok(Number(await slider.inputValue()) < 1);
+  await page.evaluate(() => { window.seekChecks.hold = true; });
+  await slider.press("ArrowRight");
+  await page.waitForFunction(() => Boolean(window.seekChecks.release));
+  assert.equal(await slider.isDisabled(), false, "Accept input while seeking");
+  const firstRequested = Number(await slider.inputValue());
+  await slider.press("ArrowRight");
+  await slider.press("ArrowRight");
+  assert.equal(await page.evaluate(() => window.seekChecks.count), 4, "Do not rebuild concurrently");
+  assert.ok(Math.abs(Number(await slider.inputValue()) - firstRequested - 10) < 0.01, "Accumulate rapid arrows");
+  await page.evaluate(() => window.seekChecks.release());
+  await page.waitForFunction(() => window.seekChecks.count === 5 && document.querySelector('[data-testid="playback-state"]').textContent === "PLAYING");
+  assert.ok(Math.abs(Number(await slider.inputValue()) - firstRequested - 10) < 1, "Honor the latest queued destination");
   await slider.press("End");
   await page.waitForFunction(() => document.querySelector('[data-testid="playback-state"]').textContent === "READY", undefined, { timeout: 15_000 });
   assert.equal(Number(await slider.inputValue()), Number(await slider.getAttribute("max")));
@@ -79,14 +97,17 @@ try {
   });
   await slider.press("End");
   await page.waitForFunction(() => document.querySelector('[data-testid="playback-state"]').textContent === "SEEKING");
+  await slider.press("Home");
+  const beforeStop = await page.evaluate(() => window.seekChecks.count);
   await page.getByRole("button", { name: "停止", exact: true }).click();
   await page.waitForFunction(() => document.querySelector('[data-testid="playback-state"]').textContent === "READY");
   await page.waitForTimeout(500);
   assert.equal(Number(await slider.inputValue()), 0);
   assert.equal(await page.evaluate(() => window.seekChecks.engine.canSeek()), false);
+  assert.equal(await page.evaluate(() => window.seekChecks.count), beforeStop, "STOP discards the queued seek");
   assert.deepEqual(errors, []);
   await page.screenshot({ path: "/tmp/madrv-playback-seek.png", fullPage: true });
-  console.log(JSON.stringify({ duration, forward, backward, dragCommitsOnce: true, keyboard: true, naturalEnd: true, cancelledSeek: true, pageErrors: errors }, null, 2));
+  console.log(JSON.stringify({ duration, forward, backward, dragCommitsOnce: true, keyboard: true, queuedArrows: true, naturalEnd: true, cancelledSeek: true, pageErrors: errors }, null, 2));
 } catch (error) {
   if (page) {
     console.error(await page.locator("body").innerText());

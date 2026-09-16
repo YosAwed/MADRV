@@ -188,6 +188,32 @@ describe("MDR playback clock at the hardware ending", () => {
 });
 
 describe("hardware-only seek transport", () => {
+  it("resets MDX mutes on a new playback without requiring the UI to clear them", async () => {
+    const h = createHarness();
+    await h.engine.playMdx(new ArrayBuffer(0), undefined, 1, vi.fn(), vi.fn());
+    h.engine.setMdrMutedTracks([0, 8]);
+    expect(h.player.setChannelMask).toHaveBeenLastCalledWith(257);
+    await h.engine.playMdx(new ArrayBuffer(0), undefined, 1, vi.fn(), vi.fn());
+    expect(h.player.setChannelMask).toHaveBeenLastCalledWith(0);
+    expect([...h.internal.mutedMdrTracks]).toEqual([]);
+    h.engine.stop();
+  });
+
+  it.each(["mdx", "mdr"])("reuses the measured two-pass duration for %s playback and seeking", async format => {
+    const h = createHarness();
+    h.hardware.duration = 10;
+    h.player.measureDuration.mockImplementation(loops => 10 + (loops - 1) * 7);
+    const info = format === "mdx"
+      ? await h.engine.playMdx(new ArrayBuffer(0), undefined, 2, vi.fn(), vi.fn())
+      : await h.engine.playMdr(makeMdr(), undefined, 2, vi.fn(), vi.fn());
+    expect(info.duration).toBe(10);
+    expect(h.player.measureDuration.mock.calls).toEqual([[2]]);
+    h.player.measureDuration.mockClear();
+    await h.engine.seekTo(5);
+    expect(h.player.measureDuration.mock.calls).toEqual([[2]]);
+    h.engine.stop();
+  });
+
   it("rebuilds MDX at the requested position and ends after the remaining duration", async () => {
     const h = createHarness();
     h.hardware.duration = 10;

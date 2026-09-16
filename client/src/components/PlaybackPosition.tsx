@@ -17,18 +17,29 @@ export function PlaybackPosition({ elapsed, duration, enabled, busy, unavailable
 }) {
   const [preview, setPreview] = useState<number | null>(null);
   const draft = useRef<number | null>(null);
-  const usable = enabled && !busy && duration > 0;
+  const requested = useRef<number | null>(null);
+  const usable = enabled && duration > 0;
   const clear = () => { draft.current = null; setPreview(null); };
-  useEffect(() => { if (!usable) clear(); }, [usable]);
+  useEffect(() => {
+    if (!usable || !busy) {
+      requested.current = null;
+      if (!usable || draft.current === null) setPreview(null);
+      if (!usable) draft.current = null;
+    }
+  }, [usable, busy, elapsed]);
   const commit = () => {
     const target = draft.current;
-    clear();
-    if (usable && target !== null) onSeek(target);
+    draft.current = null;
+    if (usable && target !== null) {
+      requested.current = target;
+      setPreview(target);
+      onSeek(target);
+    }
   };
   const shown = preview ?? elapsed;
   const progress = playbackProgressPercent(shown, duration);
   const valueText = `${time(shown)} / ${duration ? time(duration) : "--:--"}`;
-  const title = busy ? "再生位置を移動しています。停止で中止できます。" : usable
+  const title = busy ? "移動中も次の位置を指定できます。停止で中止できます。" : usable
     ? "クリック、ドラッグ、矢印キーで現在の周回内を移動します。MIDIは移動先以降のノートから再開します。"
     : unavailableReason;
   return <span className="deck-inline-position" data-testid="playback-time-position">
@@ -47,7 +58,7 @@ export function PlaybackPosition({ elapsed, duration, enabled, busy, unavailable
           const delta = ["ArrowRight", "ArrowUp"].includes(event.key) ? 5 : ["ArrowLeft", "ArrowDown"].includes(event.key) ? -5 : undefined;
           if (delta !== undefined) {
             event.preventDefault();
-            const value = Math.min(duration, Math.max(0, (draft.current ?? elapsed) + delta));
+            const value = Math.min(duration, Math.max(0, (draft.current ?? requested.current ?? elapsed) + delta));
             draft.current = value;
             setPreview(value);
           } else if (event.key === "Escape") { event.preventDefault(); clear(); }

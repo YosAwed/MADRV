@@ -8,7 +8,7 @@ const [mdxPath, pdxPath] = process.argv.slice(2);
 if (!mdxPath) throw new Error("Usage: node scripts/verify-playback-seek-wasm.mjs /path/to/song.mdx [/path/to/bank.pdx]");
 const mdx = await readFile(mdxPath);
 const pdx = pdxPath ? await readFile(pdxPath) : new Uint8Array();
-const wasmBinary = await readFile(new URL("../client/public/manus-storage/madrv-mdx-player-v12_2d6b7625.wasm", import.meta.url));
+const wasmBinary = await readFile(new URL("../client/public/manus-storage/madrv-mdx-player-v13_6e789f63.wasm", import.meta.url));
 const code = await transform(await readFile(new URL("../client/src/lib/playbackSeek.ts", import.meta.url), "utf8"), { loader: "ts", format: "esm" });
 const { advancePlaybackSilently } = await import(`data:text/javascript;base64,${Buffer.from(code.code).toString("base64")}`);
 

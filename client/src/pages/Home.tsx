@@ -505,6 +505,7 @@ export default function Home() {
   const playlistStartRequestRef = useRef(0);
   const sourceLoadAbortRef = useRef<AbortController | null>(null);
   const preparingRequestRef = useRef<number | null>(null);
+  const seekRequestRef = useRef<{ target: number | null } | null>(null);
   const diagnosisRequestRef = useRef(0);
   const publicStorage = trpc.publicStorage.fetchAsset.useMutation();
   const sharedSessionCreate = trpc.sharedSession.create.useMutation();
@@ -524,6 +525,7 @@ export default function Home() {
 
   function cancelSourceTransition() {
     playlistStartRequestRef.current += 1;
+    seekRequestRef.current = null;
     sourceLoadAbortRef.current?.abort();
     sourceLoadAbortRef.current = null;
     if (preparingRequestRef.current !== null) {
@@ -568,16 +570,28 @@ export default function Home() {
   }
 
   async function seekPlayback(seconds: number) {
-    if (playbackLoading || !isPlaying || !audioRef.current?.canSeek()) return;
+    // Serialize renderer rebuilds and retain the latest destination while one
+    // is pending. The source generation also cancels queued requests on STOP.
+    if (seekRequestRef.current) {
+      seekRequestRef.current.target = seconds;
+      return;
+    }
+    if (loadingSource !== null || isPreparingPlayback || !isPlaying || !audioRef.current?.canSeek()) return;
     const requestId = playlistStartRequestRef.current;
+    const request = { target: seconds as number | null };
+    seekRequestRef.current = request;
     preparingRequestRef.current = requestId;
     setIsSeeking(true);
-    setNotice(`${formatPlaybackTime(seconds)}へ移動しています。停止で中止できます。`);
     try {
-      const info = await audio().seekTo(seconds);
-      if (requestId !== playlistStartRequestRef.current) return;
-      setDuration(info.duration);
-      setNotice(`${formatPlaybackTime(seconds)}から再生しています。`);
+      while (request.target !== null) {
+        const target = request.target;
+        request.target = null;
+        setNotice(`${formatPlaybackTime(target)}へ移動しています。停止で中止できます。`);
+        const info = await audio().seekTo(target);
+        if (requestId !== playlistStartRequestRef.current) return;
+        setDuration(info.duration);
+        setNotice(`${formatPlaybackTime(target)}から再生しています。`);
+      }
     } catch (error) {
       if (requestId !== playlistStartRequestRef.current) return;
       audio().stop();
@@ -587,6 +601,7 @@ export default function Home() {
       setNotice(error instanceof Error ? error.message : "再生位置を移動できませんでした。");
     } finally {
       if (requestId === playlistStartRequestRef.current) {
+        seekRequestRef.current = null;
         preparingRequestRef.current = null;
         setIsSeeking(false);
       }
@@ -1861,7 +1876,7 @@ export default function Home() {
     if (engineId === "midi") return isGsMidiEngineArmed(isPlaying, mdrInfo?.midiTracks ?? 0, mmlEngineFlags.midi);
     return false;
   };
-  const seekEnabled = isPlaying && !playbackLoading && Boolean(audioRef.current?.canSeek());
+  const seekEnabled = isPlaying && (isSeeking || (!playbackLoading && Boolean(audioRef.current?.canSeek())));
   const seekUnavailableReason = !isPlaying ? "MDXまたは内蔵SoundFontを使うMDRの再生中に位置を移動できます。"
     : mode === "mml" ? "MMLの位置移動は未対応です。"
     : "外部MIDI出力での位置移動は未対応です。内蔵SoundFontで再生してください。";
