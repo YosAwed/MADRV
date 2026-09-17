@@ -182,15 +182,28 @@ try {
   }
   // A new selection must not carry activity from the previous song.
   await page.getByRole("button", { name: "再生", exact: true }).click();
-  await page.waitForFunction(
-    () => document.querySelectorAll("[data-pcm-hit]").length > 0
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll("[data-pcm-hit]")].some(
+      node => Number(node.getAttribute("x")) < 75
+    )
   );
   await page.locator('input[type="file"][accept*=".mdx"]').setInputFiles({
     name: "SECOND.MDX",
     mimeType: "application/octet-stream",
     buffer: mdx,
   });
-  assert.equal(await page.locator("[data-pcm-hit]").count(), 0);
+  await page
+    .getByTestId("playback-notice")
+    .filter({ hasText: "SECOND.MDX" })
+    .waitFor();
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll("[data-pcm-hit]")].every(
+      node => Number(node.getAttribute("x")) > 85
+    )
+  );
+  // File selection is asynchronous and may leave the prior transport playing.
+  // Explicitly stop it before playing the new selection.
+  await page.getByLabel("停止", { exact: true }).click();
   await page.setViewportSize({ width: 1366, height: 900 });
   if ((await settings.getAttribute("aria-expanded")) === "true")
     await settings.click();
