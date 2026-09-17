@@ -18,3 +18,10 @@ Rebuild with WABT 1.0.39: `WABT_BIN=/path/to/wabt/bin node scripts/build-pcm-sam
 - Chromium and WebKit passed the generated PCM8 browser check: banks 0–7 including aliased sample data, retained last number, mute/solo, stop, seek, live source selection and 20 viewport/playlist/settings layouts. A generated MDR routed source slots 24–31 to PCM voices 1–8 and displayed the corresponding numbers correctly. No page errors. Screenshots inspected.
 
 This extends the existing staging-only PCM activity prototype. Production remains unchanged.
+
+## Staging deployment
+
+- Deployed clean source `9b11549cc273` on `codex/pcm-activity-strip` to `https://madrv-player-staging.madrv-player-web.workers.dev/`.
+- Cloudflare version: `93f0785e-7e7e-419d-964f-1e5777c79c03`.
+- Public staging passed the generated-fixture Chromium browser check: all eight PCM sample numbers, routed MDR sources, 20 layout combinations, mute/solo, seek, stop and source replacement, with no page errors.
+- `build-info.json` confirmed the clean source revision. The production page still references `index-TksT0Ud1.css`; no production deployment was performed.
