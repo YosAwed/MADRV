@@ -9,3 +9,7 @@ Production build passed with the existing chunk-size warning. Existing `verify-p
 The browser check also measures the release: the prior sample number remains at onset, 100 ms and 350 ms after note-off; the background passes through an intermediate color and reaches the idle color. Both Chromium and WebKit passed after the fade addition; both TypeScript checks and the build passed.
 
 Development branch: `codex/pcm-pad-contrast`. Production remains unchanged pending release.
+
+## Staging deployment
+
+Clean source `8986a05f4555` deployed to `https://madrv-player-staging.madrv-player-web.workers.dev/` as Worker version `68258731-d05c-4018-a4f6-7163e4f2790e`. The public Chromium check passed including the measured fade, retained numbers, PCM8/routed MDR, 20 layout cases and playback controls. Build metadata matched. Production still serves `index-BM8V5aD5.js`.
