@@ -23,3 +23,9 @@ This is a new development branch `codex/pcm-pan-pads`; production remains on the
 Clean source `d5f8e3b82ea7` deployed to `https://madrv-player-staging.madrv-player-web.workers.dev/` as version `fb547537-ba75-4635-b721-83a171d07721`. Public Chromium and final local WebKit checks passed all pad/PAN/fixed-number/layout and playback cases after the grouped-control adjustment. Production still serves `index-CVWpVxLs.js`. Main remains unchanged.
 
 Follow-up: centered numbers at the user's request in `ecfd5ecf2fa5`, deployed to staging as `c9c71314-66cf-44f6-b3cc-1ae0f1976f09`. The public Chromium pad check passed, and the mobile screenshot confirmed the number itself is centered independently of PAN markers. No production deployment.
+
+## Production release
+
+On 2026-09-18, the user requested production deployment plus commit/push. Fast-forwarded and pushed `main` from `3d65c58` to the tested branch head `1491d13`. Production build succeeded with the existing chunk-size warning; deployed `madrv-player` as Worker version `322f427c-d201-4ecb-b156-34023f8c7b6d`.
+
+Public production passed `verify-pcm-pads.mjs`: ordinary PCM one pad, PCM8 eight pads, routed MDR, PAN, fixed number positions, 20 layout cases, mute/solo and seek, with no page errors. Fetched HTML, `index-BM8V5aD5.js`, `index-D2uGsxYC.css` and the v15 WASM all matched the local release artifacts byte-for-byte. Previous production version for rollback: `05dc4fa7-2eec-4dd1-8c39-1e6d7481cec9`.
