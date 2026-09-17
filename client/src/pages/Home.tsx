@@ -1,5 +1,6 @@
 import { CompactPanel, type CompactPanelHandle } from "@/components/CompactPanel";
 import { PlaybackPosition } from "@/components/PlaybackPosition";
+import { PcmActivityStrip } from "@/components/PcmActivityStrip";
 /* Compact Signal Deck: persistent playback controls and independently folding sections. */
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { Button } from "@/components/ui/button";
@@ -2025,7 +2026,7 @@ export default function Home() {
                       <p className={`mono m-0 w-[3.6rem] shrink-0 truncate text-[9px] font-medium ${tone}`} title={track.label}>{track.label}</p>
                       <span className={`mono matrix-note-label text-[11px] font-semibold tracking-tight ${muted ? "text-[#ff9b94]" : lit ? "text-primary" : "text-[#6f746a]"}`} title={lit || (muted ? "Muted" : isPad ? "Pad · live keyboard" : "Awaiting")}>{muted ? "MUTE" : isPad ? "PAD" : summarizeKeyboardNotes(lit) || "·"}</span>
                       {isPad
-                        ? <div className="min-w-0 flex-1" aria-hidden="true" />
+                        ? <PcmActivityStrip label={track.label} active={isPcmVoiceActive(pcmActivityMask, track.pcmVoice ?? 1)} muted={muted} running={isPlaying && !playbackLoading} source={mode === "remote" ? remoteSource?.source : localMdr} />
                         : <TrackFullKeyboard label={track.label} midiNotes={keys} muted={muted} />}
                       <div className="flex shrink-0 gap-0.5">
                         <button type="button" aria-label={`${track.label}のミュートを${muted ? "オフ" : "オン"}にする`} aria-pressed={muted} onClick={() => toggleTrackMute(track)} className={`mono border px-1 py-0.5 text-[7px] tracking-[0.06em] ${muted ? "border-[#ff746c] bg-[#52241f]/30 text-[#ffb0a8]" : "border-white/20 text-[#dfe1d8] hover:border-primary hover:text-primary"}`} title={muted ? "Mute on" : "Mute off"}>{muted ? "M*" : "M"}</button>
