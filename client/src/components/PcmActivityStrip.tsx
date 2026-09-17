@@ -4,12 +4,14 @@ import { PcmActivityHistory } from "@/lib/pcmActivityHistory";
 export const PcmActivityStrip = memo(function PcmActivityStrip({
   label,
   active,
+  sampleNumber,
   muted,
   running,
   source,
 }: {
   label: string;
   active: boolean;
+  sampleNumber: number | null;
   muted: boolean;
   running: boolean;
   source: ArrayBuffer | null | undefined;
@@ -19,6 +21,14 @@ export const PcmActivityStrip = memo(function PcmActivityStrip({
   const activeRef = useRef(false);
   const enabled = running && !muted;
   const lit = enabled && active;
+  const [lastSample, setLastSample] = useState<number | null>(null);
+
+  useEffect(() => {
+    setLastSample(null);
+  }, [running, source]);
+  useEffect(() => {
+    if (lit && sampleNumber !== null) setLastSample(sampleNumber);
+  }, [lit, sampleNumber, running, source]);
 
   useEffect(() => {
     history.clear();
@@ -56,18 +66,25 @@ export const PcmActivityStrip = memo(function PcmActivityStrip({
   }, [history, enabled, lit, source, running, muted]);
 
   const state = muted ? "ミュート中" : lit ? "発音中" : "待機中";
+  const number = lit && sampleNumber !== null ? sampleNumber : lastSample;
+  const sampleLabel =
+    number === null ? "" : `#${String(number).padStart(3, "0")}`;
   return (
     <div
       className={`pcm-activity-strip${lit ? " is-active" : ""}${muted ? " is-muted" : ""}`}
       data-testid="pcm-activity-strip"
       data-active={lit}
       role="img"
-      aria-label={`${label}、${state}。直近4秒の発音履歴、右端が現在。`}
-      title="直近4秒の発音履歴（右端が現在）。音量や波形を示す表示ではありません。"
+      aria-label={`${label}、${state}${sampleLabel ? `、${lit ? "" : "前回の"}サンプル${sampleLabel}` : ""}。直近4秒の発音履歴、右端が現在。`}
+      title="番号はPDXのサンプル番号（0始まり、PCM8はバンク×96を含む）。消灯中は前回の番号。右端が現在の4秒間の発音履歴です。"
     >
       <span className="pcm-activity-lamp" aria-hidden="true" />
-      <span className="mono pcm-activity-status" aria-hidden="true">
-        {muted ? "MUTE" : lit ? "ON" : "—"}
+      <span
+        className="mono pcm-activity-status"
+        data-sample-number={number ?? undefined}
+        aria-hidden="true"
+      >
+        {muted ? "MUTE" : sampleLabel || (lit ? "ON" : "—")}
       </span>
       <svg
         className="pcm-activity-history"

@@ -1097,7 +1097,7 @@ const CONVERTER_WASM_URL = "/manus-storage/madrv-converter-v4_f7f66741.wasm";
 const PLAYER_MODULE_URL = "/manus-storage/madrv-mdx-player-v12_fde3ce0c.mjs";
 // v13 keeps the v12 ABI and discards masked PCM key-ons when unmuting.
 // MDR and MDX playback share this core.
-const PLAYER_WASM_URL = "/manus-storage/madrv-mdx-player-v13_6e789f63.wasm";
+const PLAYER_WASM_URL = "/manus-storage/madrv-mdx-player-v14_09c287f0.wasm";
 const MIDI_EVENTS_MODULE_URL = "/manus-storage/madrv-midi-events-v4_b2d6bf6b.mjs";
 const MIDI_EVENTS_WASM_URL = "/manus-storage/madrv-midi-events-v4_2facde2d.wasm";
 const SPESSA_PROCESSOR_URL = "/manus-storage/madrv-spessasynth-processor.js";
@@ -1714,8 +1714,19 @@ class MadrvWasmPlayer {
 
   getPcmActiveMask(): number {
     if (!this.player || !this.active) return 0;
-    const getMask = this.player._mdx_player_get_pcm_active_mask as () => number;
+    const exports = this.player.asm as Record<string, unknown> | undefined;
+    const getMask = (exports?.get_pcm_activity_mask ?? this.player._mdx_player_get_pcm_active_mask) as () => number;
     return getMask() & 0xff;
+  }
+
+  getPcmSampleNumbers(mask: number): (number | null)[] {
+    const exports = this.player?.asm as Record<string, unknown> | undefined;
+    const getNumber = exports?.get_pcm_sample_number;
+    return Array.from({ length: 8 }, (_, voice) => {
+      if (!this.active || !(mask & (1 << voice)) || typeof getNumber !== "function") return null;
+      const number = getNumber(voice);
+      return Number.isInteger(number) && number >= 0 && number <= 25503 ? number : null;
+    });
   }
 
   getHardwareTrackMidiNote(trackIndex: number): number | null {
@@ -1908,6 +1919,8 @@ export class SignalDeckAudio {
   private diagnosticListener?: (entries: MidiDiagnosticEntry[]) => void;
   private outputPeakListener?: (peak: number) => void;
   private pcmActivityListener?: (mask: number) => void;
+  private pcmSampleListener?: (samples: readonly (number | null)[]) => void;
+  private reportedPcmSamples: (number | null)[] = [];
   private mdrTrackKeyListener?: (state: MdrTrackKeyState) => void;
   private timerBListener?: (value: number | null) => void;
   private hardwarePlaybackPositionListener?: (milliseconds: number | null) => void;
@@ -2206,6 +2219,11 @@ export class SignalDeckAudio {
     listener?.(0);
   }
 
+  setPcmSampleListener(listener: ((samples: readonly (number | null)[]) => void) | undefined) {
+    this.pcmSampleListener = listener;
+    listener?.(this.reportedPcmSamples);
+  }
+
   setMdrTrackKeyListener(listener: ((state: MdrTrackKeyState) => void) | undefined) {
     this.mdrTrackKeyListener = listener;
     this.publishMdrTrackKeys(true);
@@ -2228,10 +2246,17 @@ export class SignalDeckAudio {
 
   private resetPcmActivity() {
     this.pcmActivityListener?.(0);
+    this.reportedPcmSamples = [];
+    this.pcmSampleListener?.([]);
   }
 
   private reportPcmActivity(mask: number) {
     this.pcmActivityListener?.(mask & 0xff);
+    if (!this.pcmSampleListener) return;
+    const samples = this.mdrPlayer?.getPcmSampleNumbers(mask) ?? [];
+    if (samples.length === this.reportedPcmSamples.length && samples.every((sample, voice) => sample === this.reportedPcmSamples[voice])) return;
+    this.reportedPcmSamples = samples;
+    this.pcmSampleListener(samples);
   }
 
   private reportTimerB(value: number | null) {

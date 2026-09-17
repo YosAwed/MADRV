@@ -363,6 +363,7 @@ export default function Home() {
   const [localPdxAutoMatched, setLocalPdxAutoMatched] = useState(false);
   const [mixOutputPeak, setMixOutputPeak] = useState(0);
   const [pcmActivityMask, setPcmActivityMask] = useState(0);
+  const [pcmSamples, setPcmSamples] = useState<readonly (number | null)[]>([]);
   const [remoteSource, setRemoteSource] = useState<{ source: ArrayBuffer; pdx?: ArrayBuffer; format: "mdr" | "mdx"; title: string } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -816,6 +817,7 @@ export default function Home() {
     player.setDiagnosticListener(setMidiDiagnostics);
     player.setOutputPeakListener(setMixOutputPeak);
     player.setPcmActivityListener(setPcmActivityMask);
+    player.setPcmSampleListener(setPcmSamples);
     player.setMdrTrackKeyListener(setTrackKeyState);
     player.setTimerBListener(setTimerB);
     player.setHardwarePlaybackPositionListener(setHardwarePlaybackPositionMs);
@@ -824,6 +826,7 @@ export default function Home() {
       player.setDiagnosticListener(undefined);
       player.setOutputPeakListener(undefined);
       player.setPcmActivityListener(undefined);
+      player.setPcmSampleListener(undefined);
       player.setMdrTrackKeyListener(undefined);
       player.setTimerBListener(undefined);
       player.setHardwarePlaybackPositionListener(undefined);
@@ -2026,7 +2029,7 @@ export default function Home() {
                       <p className={`mono m-0 w-[3.6rem] shrink-0 truncate text-[9px] font-medium ${tone}`} title={track.label}>{track.label}</p>
                       <span className={`mono matrix-note-label text-[11px] font-semibold tracking-tight ${muted ? "text-[#ff9b94]" : lit ? "text-primary" : "text-[#6f746a]"}`} title={lit || (muted ? "Muted" : isPad ? "Pad · live keyboard" : "Awaiting")}>{muted ? "MUTE" : isPad ? "PAD" : summarizeKeyboardNotes(lit) || "·"}</span>
                       {isPad
-                        ? <PcmActivityStrip label={track.label} active={isPcmVoiceActive(pcmActivityMask, track.pcmVoice ?? 1)} muted={muted} running={isPlaying && !playbackLoading} source={mode === "remote" ? remoteSource?.source : localMdr} />
+                        ? <PcmActivityStrip label={track.label} active={isPcmVoiceActive(pcmActivityMask, track.pcmVoice ?? 1)} sampleNumber={pcmSamples[(track.pcmVoice ?? 1) - 1] ?? null} muted={muted} running={isPlaying && !playbackLoading} source={mode === "remote" ? remoteSource?.source : localMdr} />
                         : <TrackFullKeyboard label={track.label} midiNotes={keys} muted={muted} />}
                       <div className="flex shrink-0 gap-0.5">
                         <button type="button" aria-label={`${track.label}のミュートを${muted ? "オフ" : "オン"}にする`} aria-pressed={muted} onClick={() => toggleTrackMute(track)} className={`mono border px-1 py-0.5 text-[7px] tracking-[0.06em] ${muted ? "border-[#ff746c] bg-[#52241f]/30 text-[#ffb0a8]" : "border-white/20 text-[#dfe1d8] hover:border-primary hover:text-primary"}`} title={muted ? "Mute on" : "Mute off"}>{muted ? "M*" : "M"}</button>

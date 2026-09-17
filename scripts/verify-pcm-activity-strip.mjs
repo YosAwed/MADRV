@@ -15,6 +15,8 @@ const tracks = Array.from({ length: 16 }, (_, i) =>
             15,
             0xed,
             4,
+            0xfd,
+            i - 8,
             ...(i > 8 ? [i - 8] : []),
             ...Array.from({ length: 8 }, () => [
               0x80, 23, 47, 0x81, 95, 47,
@@ -36,12 +38,18 @@ const mdx = Buffer.concat([
   table,
   ...tracks,
 ]);
-const pdx = Buffer.alloc(768 + 2048 + 24000);
-pdx.writeUInt32BE(768, 0);
-pdx.writeUInt32BE(2048, 4);
-pdx.writeUInt32BE(768 + 2048, 8);
-pdx.writeUInt32BE(24000, 12);
-for (let i = 768; i < pdx.length; i++) pdx[i] = i % 16 < 8 ? 0x11 : 0x99;
+const pdxHeaderSize = 8 * 96 * 8;
+const pdx = Buffer.alloc(pdxHeaderSize + 2048 + 24000);
+// Different bank numbers alias the same sample data. Report the selected
+// table entry rather than guessing from the sample address.
+for (let bank = 0; bank < 8; bank++) {
+  pdx.writeUInt32BE(pdxHeaderSize, bank * 96 * 8);
+  pdx.writeUInt32BE(2048, bank * 96 * 8 + 4);
+  pdx.writeUInt32BE(pdxHeaderSize + 2048, bank * 96 * 8 + 8);
+  pdx.writeUInt32BE(24000, bank * 96 * 8 + 12);
+}
+for (let i = pdxHeaderSize; i < pdx.length; i++)
+  pdx[i] = i % 16 < 8 ? 0x11 : 0x99;
 const browser =
   process.env.MADRV_BROWSER === "webkit"
     ? await webkit.launch({ headless: true })
@@ -89,11 +97,35 @@ try {
     undefined,
     { timeout: 15000 }
   );
+  await page.waitForFunction(() =>
+    Array.from(
+      { length: 8 },
+      (_, voice) =>
+        document
+          .querySelector(
+            `[data-testid="keyboard-track-${voice + 8}"] [data-sample-number]`
+          )
+          ?.getAttribute("data-sample-number") === String(voice * 96 + 1)
+    ).every(Boolean)
+  );
   await page.getByTestId("panel-toggle-matrix").scrollIntoViewIfNeeded();
   await page
     .locator('[data-panel="matrix"]')
     .screenshot({ path: "/tmp/madrv-pcm-history-mobile.png" });
   const historyBeforeMute = await first.locator("[data-pcm-hit]").count();
+  await page.waitForFunction(
+    () =>
+      document.querySelector(
+        '[data-testid="keyboard-track-8"] [data-active="false"]'
+      ) !== null
+  );
+  assert.equal(
+    await first
+      .locator("[data-sample-number]")
+      .getAttribute("data-sample-number"),
+    "1",
+    "retain the last sample number when the voice falls silent"
+  );
   const mute = first.getByRole("button").nth(0);
   await mute.tap();
   assert.equal(await mute.getAttribute("aria-pressed"), "true");
@@ -217,10 +249,76 @@ try {
     .screenshot({ path: "/tmp/madrv-pcm-history-desktop.png" });
   await page.getByLabel("停止", { exact: true }).click();
   assert.deepEqual(errors, []);
+  // MDR source slots differ from PCM voice numbers. Route slots 24..31 to
+  // voices 1..8 and verify that labels follow the voice, not the source slot.
+  await page.getByRole("button", { name: "Clear", exact: true }).click();
+  const mdrTracks = Array.from({ length: 32 }, (_, slot) =>
+    Buffer.from(
+      slot === 0
+        ? [0xe0, 0xff, 0xe8, 0xf1, 0]
+        : slot >= 24
+          ? [0xe0, 0x08, slot - 16, ...tracks[slot - 16]]
+          : [0xf1, 0]
+    )
+  );
+  const mdrTable = Buffer.alloc(66);
+  let mdrOffset = 66;
+  mdrTracks.forEach((track, slot) => {
+    mdrTable.writeUInt16BE(mdrOffset, 2 + slot * 2);
+    mdrOffset += track.length;
+  });
+  mdrTable.writeUInt16BE(mdrOffset, 0);
+  const mdr = Buffer.concat([
+    Buffer.from("PCM routed numbers\r\n\x1aACTIVITY\0"),
+    mdrTable,
+    ...mdrTracks,
+  ]);
+  if ((await settings.getAttribute("aria-expanded")) !== "true")
+    await settings.click();
+  await page.locator('input[type="file"][accept*=".mdr"]').setInputFiles({
+    name: "ROUTED.MDR",
+    mimeType: "application/octet-stream",
+    buffer: mdr,
+  });
+  await page.getByTestId("keyboard-track-24").waitFor();
+  await settings.click();
+  await page.getByRole("button", { name: "再生", exact: true }).click();
+  await page
+    .waitForFunction(() =>
+      Array.from(
+        { length: 8 },
+        (_, voice) =>
+          document
+            .querySelector(
+              `[data-testid="keyboard-track-${voice + 24}"] [data-sample-number]`
+            )
+            ?.getAttribute("data-sample-number") === String(voice * 96 + 1)
+      ).every(Boolean)
+    )
+    .catch(async error => {
+      console.log(
+        await page.evaluate(() => ({
+          notice: document.querySelector('[data-testid="playback-notice"]')
+            ?.textContent,
+          state: document.querySelector('[data-testid="playback-state"]')
+            ?.textContent,
+          samples: [
+            ...document.querySelectorAll('[data-testid="pcm-activity-strip"]'),
+          ].map(e => ({
+            label: e.getAttribute("aria-label"),
+            number: e.querySelector("[data-sample-number]")?.textContent,
+          })),
+        }))
+      );
+      throw error;
+    });
+  await page.getByLabel("停止", { exact: true }).click();
+  assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({
       baseUrl,
       pcmVoices: 8,
+      routedMdrSamples: true,
       historyBeforeMute,
       layoutCases: 20,
       mute: true,

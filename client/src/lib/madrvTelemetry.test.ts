@@ -11,6 +11,8 @@ type TelemetryInternals = {
   resetMdrTrackKeys(): void;
   reportHardwareTrackKeys(): void;
   reportHardwareTrackKeysFromRaw(rawNotes: unknown): void;
+  reportPcmActivity(mask: number): void;
+  resetPcmActivity(): void;
   mdrHardwareTrackIndexes: number[];
   mdrPlayer?: {
     getHardwareTrackMidiNote(track: number): number | null;
@@ -42,6 +44,35 @@ describe("MDR live keyboard telemetry", () => {
     vi.clearAllTimers();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("publishes PCM sample changes without repeated renders and clears them on stop", () => {
+    const { audio, internal } = makeTelemetry();
+    let samples: (number | null)[] = [
+      0,
+      97,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ];
+    Object.assign(internal, {
+      mdrPlayer: { getPcmSampleNumbers: () => [...samples] },
+    });
+    const listener = vi.fn();
+    audio.setPcmSampleListener(listener);
+    listener.mockClear();
+    internal.reportPcmActivity(3);
+    internal.reportPcmActivity(3);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenLastCalledWith(samples);
+    samples = [null, 193, null, null, null, null, null, null];
+    internal.reportPcmActivity(2);
+    expect(listener).toHaveBeenLastCalledWith(samples);
+    internal.resetPcmActivity();
+    expect(listener).toHaveBeenLastCalledWith([]);
   });
 
   it.each([
