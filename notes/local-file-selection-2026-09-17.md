@@ -24,3 +24,7 @@ The user clarified the report: their own device works, but another Android Chrom
 Both TypeScript checks pass. The existing 216-test suite passed during this development work. The browser automation intercepts chooser results; it does not emulate or verify the native Android OS picker UI.
 
 Development branch: `codex/local-file-selection`. This is a compatibility mitigation for device testing, not a claim that the affected Android's root cause has been confirmed. Production remains unchanged pending device confirmation.
+
+## Staging
+
+Clean implementation revision `f46d126ae436` was deployed to `madrv-player-staging`, Cloudflare version `3732ed2b-f296-4e5e-aed8-6a61431656b9`. The public browser regression passed with generated files only, including the added drop case, while scripted file-input click remained blocked. Build passed with the existing chunk-size warning. No main integration or production deployment was performed. Awaiting the affected user's Android Chrome retest.
