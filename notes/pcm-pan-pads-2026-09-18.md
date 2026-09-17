@@ -17,3 +17,7 @@ Rebuild with WABT 1.0.39 via `WABT_BIN=/path/to/wabt/bin node scripts/build-pcm-
 - `verify-pcm-pads.mjs` supersedes the old history-oriented UI checks. Generated synthetic files only: ordinary MDX, eight-bank PCM8, MDR routed source slots 24–31, both matrix modes, idle/stop pad persistence, sample/PAN values, M/S, seek, and 20 width/playlist/settings layouts. Fixed number-box coordinates are checked across timed active/inactive and digit-count transitions. Chromium and WebKit passed; mobile and desktop screenshots inspected. Physical Android confirmation remains with the user.
 
 This is a new development branch `codex/pcm-pan-pads`; production remains on the previously verified ordinary-MDX history fix until release is requested.
+
+## Staging deployment
+
+Clean source `d5f8e3b82ea7` deployed to `https://madrv-player-staging.madrv-player-web.workers.dev/` as version `fb547537-ba75-4635-b721-83a171d07721`. Public Chromium and final local WebKit checks passed all pad/PAN/fixed-number/layout and playback cases after the grouped-control adjustment. Production still serves `index-CVWpVxLs.js`. Main remains unchanged.
