@@ -31,3 +31,9 @@ PLAYWRIGHT_BROWSERS_PATH=/tmp/madrv-playwright MADRV_BROWSER=webkit MADRV_MOBILE
 ```
 
 Desktop WebKit automation does not replace a retest on the user's physical iPhone.
+
+## Staging deployment
+
+Implementation `e21b5a3e2189` was pushed to `origin/codex/playback-seek` and deployed as a clean staging build. Cloudflare staging version: `c44d47b5-9446-4d44-a039-c3ac8e53d4c0`.
+
+The public mobile touch smoke test displayed the expected revision and passed: generated MDX duration 24.035 s, first tap to 12.0976 s, second tap to 6.0488 s, ArrowLeft to 1.0488 s, End to READY; no page errors. Production deployment histories captured immediately before and after were identical. No main merge or production deployment was performed.
