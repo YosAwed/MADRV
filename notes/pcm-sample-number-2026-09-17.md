@@ -25,3 +25,13 @@ This extends the existing staging-only PCM activity prototype. Production remain
 - Cloudflare version: `93f0785e-7e7e-419d-964f-1e5777c79c03`.
 - Public staging passed the generated-fixture Chromium browser check: all eight PCM sample numbers, routed MDR sources, 20 layout combinations, mute/solo, seek, stop and source replacement, with no page errors.
 - `build-info.json` confirmed the clean source revision. The production page still references `index-TksT0Ud1.css`; no production deployment was performed.
+
+## Production release after user acceptance
+
+On 2026-09-17, the user accepted staging and requested production release. Fast-forwarded `main` from `7732316` to `30dfc380b1e4` and pushed it to GitHub, then built and deployed the production configuration.
+
+- URL: `https://madrv-player.madrv-player-web.workers.dev/`
+- Worker version: `e58bb416-cd72-4ee0-8b71-a1c358a3a3b6`
+- Production assets: `index-B5FNQP1n.js`, `index-CVLkMJ_n.css`; fetched v14 WASM matched the verified SHA-256 above.
+- Public production passed the synthetic-fixture Chromium check: eight PCM voices and sample numbers, routed MDR source slots, 20 layout combinations, mute/solo, seek, stop and source changes; no page errors.
+- Build succeeded with the existing chunk-size warning. No code changes were made after the staging acceptance. Prior production Worker version for rollback: `82a5c7bf-dcce-4e8d-8308-d42ab4f4d600`.
