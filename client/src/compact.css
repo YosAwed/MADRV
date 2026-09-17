@@ -541,7 +541,15 @@
   margin: 0;
   opacity: 0;
   cursor: pointer;
-  touch-action: pan-y;
+  pointer-events: none;
+}
+.deck-position-track.is-seekable { touch-action: none; }
+/* Keep the 34px touch target on the track; the native range is keyboard-only. */
+.deck-position-track.is-seekable::after {
+  content: "";
+  position: absolute;
+  inset: -10px 0;
+  cursor: pointer;
 }
 .deck-position-input:disabled {
   pointer-events: none;

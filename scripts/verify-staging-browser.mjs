@@ -28,7 +28,7 @@ const browser = await chromium.launch({
   args: ["--autoplay-policy=no-user-gesture-required"],
 });
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   const errors = [];
   page.on("pageerror", error => errors.push(String(error)));
   await page.goto(origin, { waitUntil: "networkidle" });
@@ -47,19 +47,25 @@ try {
   const slider = page.getByTestId("playback-seek");
   const duration = Number(await slider.getAttribute("max"));
   assert.ok(duration > 20 && duration < 30);
+  await slider.scrollIntoViewIfNeeded();
   const bounds = await slider.boundingBox();
-  await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.touchscreen.tap(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
   await page.waitForFunction(() => document.querySelector('[data-testid="playback-state"]').textContent === "PLAYING"
     && Number(document.querySelector('[data-testid="playback-seek"]').value) > 10);
   const forward = Number(await slider.inputValue());
+  await page.touchscreen.tap(bounds.x + bounds.width / 4, bounds.y + bounds.height / 2);
+  await page.waitForFunction(() => document.querySelector('[data-testid="playback-state"]').textContent === "PLAYING"
+    && Number(document.querySelector('[data-testid="playback-seek"]').value) < 8);
+  const secondTap = Number(await slider.inputValue());
+  assert.ok(Math.abs(secondTap - duration / 4) < 1);
   await slider.press("ArrowLeft");
   await page.waitForFunction(from => document.querySelector('[data-testid="playback-state"]').textContent === "PLAYING"
-    && Number(document.querySelector('[data-testid="playback-seek"]').value) < from - 3, forward);
+    && Number(document.querySelector('[data-testid="playback-seek"]').value) < from - 3, secondTap);
   const backward = Number(await slider.inputValue());
   await page.screenshot({ path: "/tmp/madrv-staging-browser.png", fullPage: true });
   await slider.press("End");
   await page.waitForFunction(() => document.querySelector('[data-testid="playback-state"]').textContent === "READY");
   assert.equal(Number(await slider.inputValue()), duration);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ origin, banner, fixture: "generated 163-byte MDX", duration, forward, backward, naturalEnd: true, pageErrors: errors }, null, 2));
+  console.log(JSON.stringify({ origin, banner, fixture: "generated 163-byte MDX", touch: true, duration, forward, secondTap, backward, naturalEnd: true, pageErrors: errors }, null, 2));
 } finally { await browser.close(); }

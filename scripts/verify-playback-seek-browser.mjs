@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { chromium } from "playwright-core";
+import { chromium, webkit } from "playwright-core";
 
-const [mdx, pdx] = process.argv.slice(2);
-if (!mdx) throw new Error("Usage: node scripts/verify-playback-seek-browser.mjs /path/to/song.mdx [/path/to/bank.pdx]");
+const [mdx, pdx, soundfont] = process.argv.slice(2);
+if (!mdx) throw new Error("Usage: node scripts/verify-playback-seek-browser.mjs /path/to/song.mdx-or-mdr [/path/to/bank.pdx] [/path/to/bank.sf2]");
 const baseUrl = process.env.MADRV_E2E_BASE_URL ?? "http://127.0.0.1:5173";
-const browser = await chromium.launch({
+const browser = process.env.MADRV_BROWSER === "webkit" ? await webkit.launch({ headless: true }) : await chromium.launch({
   executablePath: process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   headless: true,
   args: ["--autoplay-policy=no-user-gesture-required"],
@@ -44,6 +44,10 @@ try {
   if (await settings.getAttribute("aria-expanded") !== "true") await settings.click();
   await page.getByRole("button", { name: "LOCAL FILE", exact: true }).click();
   await page.locator('input[type="file"][accept*=".mdx"]').setInputFiles([mdx, ...(pdx ? [pdx] : [])]);
+  if (soundfont) {
+    await page.locator('input[type="file"][accept*=".sf2"]').setInputFiles(soundfont);
+    await page.getByTestId("playback-notice").filter({ hasText: "GS MIDI出力用のSoundFontを読み込みました" }).waitFor({ timeout: 60_000 });
+  }
   await page.getByLabel("マスター音量", { exact: true }).fill("0");
   const slider = page.getByTestId("playback-seek");
   assert.equal(await slider.isDisabled(), true);
@@ -51,7 +55,23 @@ try {
   await page.waitForFunction(() => !document.querySelector('[data-testid="playback-seek"]').disabled);
   const duration = Number(await slider.getAttribute("max"));
   assert.ok(duration > 10, "Use a fixture longer than 10 seconds");
+  await slider.scrollIntoViewIfNeeded();
   const bounds = await slider.boundingBox();
+  if (process.env.MADRV_MOBILE === "1") {
+    // Use real touch events: mouse input at a mobile viewport missed the
+    // original iPhone bug. Assert engine calls, not just the preview marker.
+    for (const [index, ratio] of [0.3, 0.6].entries()) {
+      await page.touchscreen.tap(bounds.x + bounds.width * ratio, bounds.y + bounds.height / 2);
+      await page.waitForFunction(count => window.seekChecks.count === count
+        && document.querySelector('[data-testid="playback-state"]').textContent === "PLAYING", index + 1);
+      const actual = Number(await slider.inputValue());
+      assert.ok(Math.abs(actual / duration - ratio) < 0.04, `Touch ${index + 1}: ${actual}/${duration}`);
+    }
+    await slider.press("Home");
+    await page.waitForFunction(() => window.seekChecks.count === 3
+      && document.querySelector('[data-testid="playback-state"]').textContent === "PLAYING");
+    await page.evaluate(() => { window.seekChecks.count = 0; });
+  }
   await page.mouse.move(bounds.x + 8, bounds.y + bounds.height / 2);
   await page.mouse.down();
   await page.mouse.move(bounds.x + bounds.width * 0.4, bounds.y + bounds.height / 2, { steps: 8 });
@@ -107,7 +127,7 @@ try {
   assert.equal(await page.evaluate(() => window.seekChecks.count), beforeStop, "STOP discards the queued seek");
   assert.deepEqual(errors, []);
   await page.screenshot({ path: "/tmp/madrv-playback-seek.png", fullPage: true });
-  console.log(JSON.stringify({ duration, forward, backward, dragCommitsOnce: true, keyboard: true, queuedArrows: true, naturalEnd: true, cancelledSeek: true, pageErrors: errors }, null, 2));
+  console.log(JSON.stringify({ browser: process.env.MADRV_BROWSER ?? "chromium", touchTaps: process.env.MADRV_MOBILE === "1", duration, forward, backward, dragCommitsOnce: true, keyboard: true, queuedArrows: true, naturalEnd: true, cancelledSeek: true, pageErrors: errors }, null, 2));
 } catch (error) {
   if (page) {
     console.error(await page.locator("body").innerText());
