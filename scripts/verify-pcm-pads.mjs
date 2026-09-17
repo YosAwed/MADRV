@@ -12,7 +12,7 @@ function fixture(format) {
     const voice=format==='mdr'?index-24:index-8;
     if(voice>=0 && voice<(format==='adpcm'?1:8))return Buffer.from([
       ...(format==='mdr'?[0xe0,8,voice+8]:[]),0xfc,voice%3+1,0xfb,15,0xed,4,0xfd,voice,
-      ...Array.from({length:12},()=>[0x80,47,15,0x81,47,15]).flat(),0xf1,0]);
+      ...Array.from({length:12},()=>[0x80,47,format==='adpcm'?47:15,0x81,47,format==='adpcm'?47:15]).flat(),0xf1,0]);
     return Buffer.from([...(index===0?(format==='mdr'?[0xe0,0xff,0xe8]:format==='pcm8'?[0xe8]:[]):[]),0xf1,0]);
   });
   const table=Buffer.alloc(2+count*2);let offset=table.length;
@@ -40,6 +40,16 @@ try{
   await page.waitForFunction(count=>Array.from({length:count},(_,v)=>{
    const pad=document.querySelector(`[data-testid="pcm-pad-${v+1}"]`);return pad?.getAttribute('data-sample-number')===String(v*96+1)&&pad?.getAttribute('data-pan')===String(v%3+1);
   }).every(Boolean),expected);
+  if(format==='adpcm'){
+   await page.waitForFunction(()=>document.querySelector('[data-testid="pcm-pad-1"]').getAttribute('data-active')==='false');
+   const fade=await first.evaluate(async pad=>{
+    const value=()=>({background:getComputedStyle(pad).backgroundColor,number:pad.querySelector('.pcm-pad-number').textContent});
+    const start=value();await new Promise(r=>setTimeout(r,100));const middle=value();await new Promise(r=>setTimeout(r,250));return {start,middle,end:value()};
+   });
+   assert.equal(fade.start.number,'1');assert.equal(fade.middle.number,'1');assert.equal(fade.end.number,'1');
+   assert.notEqual(fade.start.background,fade.end.background);assert.notEqual(fade.middle.background,fade.end.background);
+   assert.equal(fade.end.background,'rgb(24, 28, 21)');
+  }
   // At a fixed viewport the number box and its right edge must never move,
   // including transitions from one to three digits and both pan indicators.
   const metrics=await page.evaluate(async()=>{
@@ -92,5 +102,5 @@ try{
    await page.getByLabel('停止',{exact:true}).click();await page.setViewportSize({width:390,height:844});
   }
  }
- assert.deepEqual(errors,[]);console.log(JSON.stringify({baseUrl,ordinary:1,pcm8:8,routedMdr:true,pan:true,fixedDigits:true,layouts:20,mute:true,solo:true,seek:true,errors}));
+ assert.deepEqual(errors,[]);console.log(JSON.stringify({baseUrl,ordinary:1,pcm8:8,routedMdr:true,pan:true,fixedDigits:true,fade:true,layouts:20,mute:true,solo:true,seek:true,errors}));
 }finally{await browser.close();}

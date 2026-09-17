@@ -2014,7 +2014,7 @@ export default function Home() {
                   {ENGINE_BUS_ORDER.map((engine) => {
                     const busTracks = mixerTracksByEngine[engine];
                     if (!busTracks.length || (keyboardEngineFilter !== "all" && keyboardEngineFilter !== engine)) return null;
-                    if (engine === "pcm") return <PcmPadBank key={engine} tracks={busTracks} mask={pcmActivityMask} samples={pcmSamples} pans={pcmPans} running={isPlaying && !playbackLoading} mutedTracks={mutedTracks} soloTrack={soloTrack} onMute={togglePcmPadMute} onSolo={togglePcmPadSolo} />;
+                    if (engine === "pcm") return <PcmPadBank key={engine} tracks={busTracks} mask={pcmActivityMask} samples={pcmSamples} pans={pcmPans} running={isPlaying && !playbackLoading} source={mode === "remote" ? remoteSource?.source : localMdr} mutedTracks={mutedTracks} soloTrack={soloTrack} onMute={togglePcmPadMute} onSolo={togglePcmPadSolo} />;
                     const notes = mergeEngineBusNotes(busTracks, trackKeyState, mutedTracks, engine);
                     const meta = ENGINE_BUS_META[engine];
                     const lit = notes.map((note) => formatMidiNoteName(note)).join(" ");
@@ -2034,7 +2034,7 @@ export default function Home() {
                   {visibleMixerTracks.map((track) => {
                     if (track.engine === "pcm") {
                       if (track !== mixerTracksByEngine.pcm[0]) return null;
-                      return <PcmPadBank key="pcm" tracks={mixerTracksByEngine.pcm} mask={pcmActivityMask} samples={pcmSamples} pans={pcmPans} running={isPlaying && !playbackLoading} mutedTracks={mutedTracks} soloTrack={soloTrack} onMute={togglePcmPadMute} onSolo={togglePcmPadSolo} />;
+                      return <PcmPadBank key="pcm" tracks={mixerTracksByEngine.pcm} mask={pcmActivityMask} samples={pcmSamples} pans={pcmPans} running={isPlaying && !playbackLoading} source={mode === "remote" ? remoteSource?.source : localMdr} mutedTracks={mutedTracks} soloTrack={soloTrack} onMute={togglePcmPadMute} onSolo={togglePcmPadSolo} />;
                     }
                     const muted = mutedTracks.includes(track.index);
                     const solo = soloTrack === track.index;

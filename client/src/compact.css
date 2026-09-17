@@ -1103,8 +1103,8 @@
 .pcm-pad-bank { display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 8px 4px; background: #11120f; }
 .pcm-pad-bank-label { flex: 0 0 48px; margin: 22px 0 0; color: #b9c9b1; font-size: 13px; }
 .pcm-pad-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; flex: 1; min-width: 0; }
-.pcm-pad { min-width: 0; border: 1px solid #ffffff30; background: #181c15; color: #7f8873; overflow: hidden; }
-.pcm-pad.is-active { color: #11120f; border-color: #d8ff3e; background: #d8ff3e; }
+.pcm-pad { min-width: 0; border: 1px solid #ffffff30; background: #181c15; color: #7f8873; overflow: hidden; transition: background-color 300ms ease-out, color 300ms ease-out, border-color 300ms ease-out; }
+.pcm-pad.is-active { color: #11120f; border-color: #d8ff3e; background: #d8ff3e; transition: none; }
 .pcm-pad.is-muted { opacity: .55; }
 .pcm-pad-channel { display: block; height: 16px; padding-left: 4px; font-size: 10px; line-height: 16px; color: #a9aca2; }
 .pcm-pad.is-active .pcm-pad-channel { color: #303a19; }
@@ -1121,3 +1121,5 @@
   .pcm-pad-bank-label { flex-basis: auto; margin: 0; }
   .pcm-pad-grid { width: 100%; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
+
+.pcm-pad.is-muted, .pcm-pad.is-stopped { transition: none; }
