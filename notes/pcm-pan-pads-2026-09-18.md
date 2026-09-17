@@ -21,3 +21,5 @@ This is a new development branch `codex/pcm-pan-pads`; production remains on the
 ## Staging deployment
 
 Clean source `d5f8e3b82ea7` deployed to `https://madrv-player-staging.madrv-player-web.workers.dev/` as version `fb547537-ba75-4635-b721-83a171d07721`. Public Chromium and final local WebKit checks passed all pad/PAN/fixed-number/layout and playback cases after the grouped-control adjustment. Production still serves `index-CVWpVxLs.js`. Main remains unchanged.
+
+Follow-up: centered numbers at the user's request in `ecfd5ecf2fa5`, deployed to staging as `c9c71314-66cf-44f6-b3cc-1ae0f1976f09`. The public Chromium pad check passed, and the mobile screenshot confirmed the number itself is centered independently of PAN markers. No production deployment.
