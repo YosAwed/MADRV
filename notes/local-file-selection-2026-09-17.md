@@ -28,3 +28,17 @@ Development branch: `codex/local-file-selection`. This is a compatibility mitiga
 ## Staging
 
 Clean implementation revision `f46d126ae436` was deployed to `madrv-player-staging`, Cloudflare version `3732ed2b-f296-4e5e-aed8-6a61431656b9`. The public browser regression passed with generated files only, including the added drop case, while scripted file-input click remained blocked. Build passed with the existing chunk-size warning. No main integration or production deployment was performed. Awaiting the affected user's Android Chrome retest.
+
+## Production release
+
+The user explicitly requested production deployment because the affected person can only test on the production site. This supersedes the staging-only hold above; affected-device confirmation is still pending.
+
+- Fetched origin, fast-forwarded main to `cca2218` (identical to the verified development tree), and pushed origin/main.
+- Production build succeeded with the existing chunk-size warning; worklet rebuild left the source tree clean.
+- Deployed main to `madrv-player` using the explicit production configuration/account and empty environment.
+- New production version: `d5ef0794-8704-41a3-81ec-90729497fcb5`.
+- Previous production version: `40c1c6ef-e7b6-445c-8f73-cc1503e459c4`.
+- Public HTML, main JavaScript, CSS, v13 player WASM and SoundFont worklet returned HTTP 200 and matched the local build byte for byte. No staging noindex header was present.
+- At the production URL, generated-fixture Chromium tests passed for the actual arrow hit target, native file/folder choosers with scripted click blocked, single-file loading, folder playlists, MDX/PDX pairing, cancellation, keyboard and drop. No page errors. This does not replace the affected Android OS picker test.
+
+This production release record is a documentation-only commit after the deployed source revision.
