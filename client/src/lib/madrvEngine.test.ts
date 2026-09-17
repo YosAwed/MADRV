@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { extractMdrTempoTimerB, extractMmlInitialTempo, fetchRemoteSoundFont, fetchSharedSoundFont, formatMidiNoteName, formatPdxFileName, inspectMadrvSource, inspectMdr, inspectMdx, isCurrentPlaybackGeneration, isGsMidiEngineArmed, isMidiPlaybackDestinationReady, isOpmPcmEngineArmed, isPcmPdxEngineArmed, isSafariBrowserUserAgent, isSignedTimingCorrectionDraft, isWasmPcmRenderFailure, listMdrMixerTracks, MADRV_DEFAULT_TEMPO_TIMER_B, mdrRequiresPdx, mxdrvRawNoteToMidiNote, mxdrvRawNoteToPitchClass, normalizeExternalMidiAdvanceMs, normalizeSoundFontMdrDelayMs, normalizeSoundFontMdrDelayProfiles, parseRemoteCatalogPayload, playbackProgressPercent, recommendPlaybackTuning, recommendSoundFontMdrDelayMs, requiresMdrHardwareRenderer, requiresStableMadrvProfileForSoundFont, resamplePcmFrames, resolveExternalMidiDispatchAtSeconds, resolveMdrDisplayTempoTimerB, resolveMdrHardwareLoopCycleSeconds, resolveMdrInfiniteMidiCycle, resolveMdrInfiniteMidiLoopPeriodSeconds, resolveMdrMidiDispatchLeadSeconds, resolveMdrMidiLiveTargetAtSeconds, resolveMdrMidiLookaheadSeconds, resolveMdrMidiLoopDispatchAtSeconds, resolveMdrMidiPumpIntervalMs, resolveMdrMidiTimingSampleRate, resolveMdrPlaybackDuration, resolveMdrPlaybackFailsafeSeconds, resolveMdrPlaybackStartLatencySeconds, resolveMdrRendererLatencySeconds, resolveMdrTrackEngine, resolveMdxPlaybackTick, resolveNextPlaylistIndex, resolvePlaybackSampleRate, resolvePlaylistInterTrackSilenceSeconds, resolveProgressUpdateIntervalMs, resolveRealtimeVisualUpdateIntervalMs, resolveScriptProcessorBufferSize, resolveSoundFontMdrDelayProfile, resolveSoundFontMdrDispatchAtSeconds, resolveSoundFontMdrScheduleAtSeconds, resolveSoundFontMdrSyncResidualMs, resolveSoundFontMdrTimingComparisonDelay, resolveTrustedMdrMidiLoopWindow, selectMdrInfiniteMidiLoopEvents, selectMdrMidiLoopWindowEvents, setSoundFontMdrDelayProfile, shouldDispatchQueuedSoundFontMdrEvent, shouldEndFiniteMdrPlayback, shouldScheduleMdrMidiDirectlyAtLoopStart, shouldSkipMdrMidiEventAtLoopCycle, shouldStopGsSynthImmediatelyForMdrReset, stepSoundFontMdrDelayMs, timerBToEstimatedBpm, updateMidiTrackNotes, updateSoundFontMdrDelayMeasurement } from "./madrvEngine";
+import { extractMdrTempoTimerB, extractMmlInitialTempo, fetchRemoteSoundFont, fetchSharedSoundFont, formatMidiNoteName, formatPdxFileName, inspectMadrvSource, inspectMdr, inspectMdx, isCurrentPlaybackGeneration, isGsMidiEngineArmed, isMidiPlaybackDestinationReady, isOpmPcmEngineArmed, isPcmPdxEngineArmed, isSafariBrowserUserAgent, isSignedTimingCorrectionDraft, isWasmPcmRenderFailure, listMdrMixerTracks, listMdxMixerTracks, MADRV_DEFAULT_TEMPO_TIMER_B, mdrRequiresPdx, mxdrvRawNoteToMidiNote, mxdrvRawNoteToPitchClass, normalizeExternalMidiAdvanceMs, normalizeSoundFontMdrDelayMs, normalizeSoundFontMdrDelayProfiles, parseRemoteCatalogPayload, playbackProgressPercent, recommendPlaybackTuning, recommendSoundFontMdrDelayMs, requiresMdrHardwareRenderer, requiresStableMadrvProfileForSoundFont, resamplePcmFrames, resolveExternalMidiDispatchAtSeconds, resolveMdrDisplayTempoTimerB, resolveMdrHardwareLoopCycleSeconds, resolveMdrInfiniteMidiCycle, resolveMdrInfiniteMidiLoopPeriodSeconds, resolveMdrMidiDispatchLeadSeconds, resolveMdrMidiLiveTargetAtSeconds, resolveMdrMidiLookaheadSeconds, resolveMdrMidiLoopDispatchAtSeconds, resolveMdrMidiPumpIntervalMs, resolveMdrMidiTimingSampleRate, resolveMdrPlaybackDuration, resolveMdrPlaybackFailsafeSeconds, resolveMdrPlaybackStartLatencySeconds, resolveMdrRendererLatencySeconds, resolveMdrTrackEngine, resolveMdxPlaybackTick, resolveNextPlaylistIndex, resolvePlaybackSampleRate, resolvePlaylistInterTrackSilenceSeconds, resolveProgressUpdateIntervalMs, resolveRealtimeVisualUpdateIntervalMs, resolveScriptProcessorBufferSize, resolveSoundFontMdrDelayProfile, resolveSoundFontMdrDispatchAtSeconds, resolveSoundFontMdrScheduleAtSeconds, resolveSoundFontMdrSyncResidualMs, resolveSoundFontMdrTimingComparisonDelay, resolveTrustedMdrMidiLoopWindow, selectMdrInfiniteMidiLoopEvents, selectMdrMidiLoopWindowEvents, setSoundFontMdrDelayProfile, shouldDispatchQueuedSoundFontMdrEvent, shouldEndFiniteMdrPlayback, shouldScheduleMdrMidiDirectlyAtLoopStart, shouldSkipMdrMidiEventAtLoopCycle, shouldStopGsSynthImmediatelyForMdrReset, stepSoundFontMdrDelayMs, timerBToEstimatedBpm, updateMidiTrackNotes, updateSoundFontMdrDelayMeasurement } from "./madrvEngine";
 
 function makeDiagnosticMdr(midiTrackIndex = -1, legacyMidiTrackIndex = -1): ArrayBuffer {
   const title = new TextEncoder().encode("Signal Deck Diagnostic\r\n\x1aNONE\0");
@@ -179,6 +179,35 @@ describe("Signal Deck diagnostic catalog", () => {
     const mixer = listMdrMixerTracks(buffer).filter((track) => track.active);
     expect(mixer.every((track) => track.engine === "midi")).toBe(true);
     expect(mixer.find((track) => track.index === 6)).toMatchObject({ label: "GS 7", engine: "midi" });
+  });
+});
+
+describe("MDX mixer track count", () => {
+  function score(count: number, padding = 0) {
+    const title = new TextEncoder().encode("Track table\r\n\x1aTEST\0");
+    const size = 2 + count * 2 + padding;
+    const bytes = new Uint8Array(title.length + size + count * 4 + 26);
+    bytes.set(title);
+    const view = new DataView(bytes.buffer, title.length);
+    view.setUint16(0, size + count * 4);
+    for (let track = 0; track < count; track++) {
+      view.setUint16(2 + track * 2, size + track * 4);
+      bytes.set([0xff, 0xe8, 0xf1, 0], title.length + size + track * 4);
+    }
+    return bytes.buffer;
+  }
+  it("shows one ordinary ADPCM voice even when command arguments contain E8", () => {
+    for (const padding of [0, 20]) {
+      const tracks = listMdxMixerTracks(score(9, padding), true);
+      expect(tracks).toHaveLength(9);
+      expect(tracks.filter(track => track.engine === "pcm")).toEqual([
+        { index: 8, engine: "pcm", label: "PCM 1", pcmVoice: 1, active: true },
+      ]);
+    }
+  });
+  it("retains eight independently mapped PCM8 voices and the PDX availability state", () => {
+    expect(listMdxMixerTracks(score(16), true).filter(track => track.engine === "pcm").map(track => track.pcmVoice)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(listMdxMixerTracks(score(16), false).filter(track => track.engine === "pcm").every(track => !track.active)).toBe(true);
   });
 });
 

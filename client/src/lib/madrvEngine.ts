@@ -1273,8 +1273,7 @@ function readWord(bytes: Uint8Array, position: number): number {
   return (bytes[position] << 8) | bytes[position + 1];
 }
 
-/** Reads the MDX title and optional companion PDX filename without interpreting score data. */
-export function inspectMdx(input: ArrayBuffer): MdxInfo {
+function readMdxHeader(input: ArrayBuffer): { info: MdxInfo; body: number } {
   const bytes = new Uint8Array(input);
   let marker = -1;
   for (let index = 0; index + 2 < bytes.length; index += 1) {
@@ -1288,7 +1287,34 @@ export function inspectMdx(input: ArrayBuffer): MdxInfo {
   let pdxEnd = pdxStart;
   while (pdxEnd < bytes.length && bytes[pdxEnd] !== 0) pdxEnd += 1;
   if (pdxEnd >= bytes.length) throw new Error("MDXのPDXファイル名が終端されていません。");
-  return { title: decodeName(bytes.slice(0, marker)), pdxName: decodeName(bytes.slice(pdxStart, pdxEnd)) };
+  return { info: { title: decodeName(bytes.slice(0, marker)), pdxName: decodeName(bytes.slice(pdxStart, pdxEnd)) }, body: pdxEnd + 1 };
+}
+
+/** Reads the MDX title and optional companion PDX filename. */
+export function inspectMdx(input: ArrayBuffer): MdxInfo {
+  return readMdxHeader(input).info;
+}
+
+/** The first score/voice offset bounds the MDX offset table (9 or 16 tracks).
+ * Do not scan raw bytes for E8: command arguments and voice data can contain it. */
+export function listMdxMixerTracks(input: ArrayBuffer, hasPdx: boolean): MdrMixerTrack[] {
+  const bytes = new Uint8Array(input);
+  const { body } = readMdxHeader(input);
+  const size = bytes.length - body;
+  let boundary = size;
+  for (let word = 0; word < 10 && word * 2 + 1 < size; word++) {
+    const offset = readWord(bytes, body + word * 2);
+    if (offset >= 20 && offset <= size) boundary = Math.min(boundary, offset);
+  }
+  const extended = boundary >= 34 && size >= 34 && Array.from({ length: 16 }, (_, index) =>
+    readWord(bytes, body + 2 + index * 2)).every(offset => offset >= 34 && offset < size);
+  return Array.from({ length: extended ? 16 : 9 }, (_, index) => ({
+    index,
+    engine: index < 8 ? "opm" : "pcm",
+    label: index < 8 ? `OPM ${index + 1}` : `PCM ${index - 7}`,
+    active: index < 8 || hasPdx,
+    ...(index >= 8 ? { pcmVoice: index - 7 } : {}),
+  }));
 }
 
 /**
@@ -1890,16 +1916,18 @@ export class SignalDeckAudio {
     },
   });
   /**
-   * Large stable-profile audio blocks can contain several short OPM notes. Keep
+   * Large stable-profile audio blocks can contain several short OPM/PCM notes. Keep
    * their key states on the rendered audio timeline instead of sampling only
    * the final state at the end of the block.
    */
-  private mdrHardwareVisualQueue = new OrderedMidiQueue<{ snapshot: MdrTrackKeyState; generation: number }>({
+  private mdrHardwareVisualQueue = new OrderedMidiQueue<{ snapshot?: MdrTrackKeyState; pcm?: { mask: number; samples: (number | null)[]; generation: number }; generation: number }>({
     now: () => this.graph.context.currentTime,
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: timer => window.clearTimeout(timer),
-    dispatch: ({ snapshot, generation }) => {
-      if (generation === this.playbackGeneration) this.applyHardwareTrackKeys(snapshot);
+    dispatch: ({ snapshot, pcm, generation }) => {
+      if (generation !== this.playbackGeneration) return;
+      if (snapshot) this.applyHardwareTrackKeys(snapshot);
+      if (pcm && pcm.generation === this.pcmVisualGeneration) this.reportPcmActivity(pcm.mask, pcm.samples);
     },
   });
   /** Latest planned or actually submitted MIDI timestamp, including late dispatch. */
@@ -1921,6 +1949,7 @@ export class SignalDeckAudio {
   private pcmActivityListener?: (mask: number) => void;
   private pcmSampleListener?: (samples: readonly (number | null)[]) => void;
   private reportedPcmSamples: (number | null)[] = [];
+  private pcmVisualGeneration = 0;
   private mdrTrackKeyListener?: (state: MdrTrackKeyState) => void;
   private timerBListener?: (value: number | null) => void;
   private hardwarePlaybackPositionListener?: (milliseconds: number | null) => void;
@@ -2245,15 +2274,16 @@ export class SignalDeckAudio {
   }
 
   private resetPcmActivity() {
+    this.pcmVisualGeneration += 1;
     this.pcmActivityListener?.(0);
     this.reportedPcmSamples = [];
     this.pcmSampleListener?.([]);
   }
 
-  private reportPcmActivity(mask: number) {
+  private reportPcmActivity(mask: number, capturedSamples?: (number | null)[]) {
     this.pcmActivityListener?.(mask & 0xff);
     if (!this.pcmSampleListener) return;
-    const samples = this.mdrPlayer?.getPcmSampleNumbers(mask) ?? [];
+    const samples = capturedSamples ?? this.mdrPlayer?.getPcmSampleNumbers(mask) ?? [];
     if (samples.length === this.reportedPcmSamples.length && samples.every((sample, voice) => sample === this.reportedPcmSamples[voice])) return;
     this.reportedPcmSamples = samples;
     this.pcmSampleListener(samples);
@@ -2345,12 +2375,18 @@ export class SignalDeckAudio {
     this.applyHardwareTrackKeys(this.readHardwareTrackKeys());
   }
 
-  private queueHardwareTrackKeys(targetAt: number) {
-    if (!this.mdrTrackKeyListener || !this.mdrPlayer || !this.mdrHardwareTrackIndexes.length) return;
-    this.mdrHardwareVisualQueue.enqueue({ snapshot: this.readHardwareTrackKeys(), generation: this.playbackGeneration }, targetAt);
+  private queueHardwareVisuals(targetAt: number) {
+    if (!this.mdrPlayer) return;
+    const snapshot = this.mdrTrackKeyListener && this.mdrHardwareTrackIndexes.length ? this.readHardwareTrackKeys() : undefined;
+    let pcm: { mask: number; samples: (number | null)[]; generation: number } | undefined;
+    if (this.pcmActivityListener || this.pcmSampleListener) {
+      const mask = this.mdrPlayer.getPcmActiveMask();
+      pcm = { mask, samples: this.pcmSampleListener ? this.mdrPlayer.getPcmSampleNumbers(mask) : [], generation: this.pcmVisualGeneration };
+    }
+    if (snapshot || pcm) this.mdrHardwareVisualQueue.enqueue({ snapshot, pcm, generation: this.playbackGeneration }, targetAt);
   }
 
-  /** Render in small internal slices so short OPM notes are visible to the UI
+  /** Render in small internal slices so short OPM/PCM notes are visible to the UI
    * while retaining the larger ScriptProcessor buffer used for audio stability. */
   private renderMdrOutputBlock(left: Float32Array, right: Float32Array, blockPlaybackTime: number): number {
     if (!this.mdrPlayer) {
@@ -2359,12 +2395,13 @@ export class SignalDeckAudio {
       return 0;
     }
     const sampleRate = resolvePlaybackSampleRate(this.graph.context.sampleRate);
-    const sliceFrames = this.mdrTrackKeyListener ? 2048 : left.length;
+    const hasVisuals = this.mdrTrackKeyListener || this.pcmActivityListener || this.pcmSampleListener;
+    const sliceFrames = hasVisuals ? 2048 : left.length;
     let peak = 0;
     for (let offset = 0; offset < left.length; offset += sliceFrames) {
       const end = Math.min(left.length, offset + sliceFrames);
       peak = Math.max(peak, this.mdrPlayer.renderInto(left.subarray(offset, end), right.subarray(offset, end)));
-      if (this.mdrTrackKeyListener) this.queueHardwareTrackKeys(blockPlaybackTime + end / sampleRate);
+      if (hasVisuals) this.queueHardwareVisuals(blockPlaybackTime + end / sampleRate);
     }
     return peak;
   }
@@ -2393,6 +2430,8 @@ export class SignalDeckAudio {
       this.mdrMidiMuteVersions.set(track, (this.mdrMidiMuteVersions.get(track) ?? 0) + 1);
       if (this.gsMidiPort && track >= 16) delete this.mdrTrackKeys[track];
     }
+    // Discard PCM snapshots buffered before a mute/solo change, including on unmute.
+    if (muted.size !== this.mutedMdrTracks.size || Array.from(muted).some(track => !this.mutedMdrTracks.has(track))) this.resetPcmActivity();
     this.mutedMdrTracks = muted;
     const hardwareMask = trackIndexes
       .map((index) => this.mdrHardwareTrackRawIndexes.get(index) ?? index)
@@ -2997,7 +3036,6 @@ export class SignalDeckAudio {
         this.noteAudioCallback("opm", left.length);
         if (this.shouldPublishRealtimeVisuals()) {
           this.outputPeakListener?.(peak);
-          this.reportPcmActivity(this.mdrPlayer?.getPcmActiveMask() ?? 0);
           if (!this.mdrTrackKeyListener) this.reportHardwareTrackKeys();
           this.reportTimerB(this.mdrPlayer?.getTimerB() ?? null);
           this.reportHardwarePlaybackPosition(this.mdrPlayer?.getPlayAtMilliseconds() ?? null);
@@ -3143,7 +3181,6 @@ export class SignalDeckAudio {
         this.noteAudioCallback("opm", left.length);
         if (this.shouldPublishRealtimeVisuals()) {
           this.outputPeakListener?.(peak);
-          this.reportPcmActivity(this.mdrPlayer?.getPcmActiveMask() ?? 0);
           if (!this.mdrTrackKeyListener) this.reportHardwareTrackKeys();
           this.reportTimerB(this.mdrPlayer?.getTimerB() ?? null);
           this.reportHardwarePlaybackPosition(this.mdrPlayer?.getPlayAtMilliseconds() ?? null);

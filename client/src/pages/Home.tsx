@@ -23,7 +23,7 @@ import {
   Waves,
 } from "lucide-react";
 import { ChangeEvent, DragEvent, lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { compileMml, extractMmlInitialTempo, fetchRemoteCatalog, fetchRemoteSoundFont, fetchSharedSoundFont, formatMidiNoteName, formatPdxFileName, inspectMadrvSource, inspectMdr, inspectMdx, isGoogleDriveShareUrl, isGsMidiEngineArmed, isMidiPlaybackDestinationReady, isOpmPcmEngineArmed, isPcmPdxEngineArmed, isPcmVoiceActive, isSafariBrowserUserAgent, isSignedTimingCorrectionDraft, limitScore, listMdrMixerTracks, mdrRequiresPdx, MdrInfo, MdrMixerTrack, MdxInfo, MidiDiagnosticEntry, MidiOutputDevice, MmlSyntaxError, normalizeExternalMidiAdvanceMs, normalizeRemoteAssetUrl, normalizeSoundFontMdrDelayMs, normalizeSoundFontMdrDelayProfiles, parseRemoteCatalogPayload, recommendPlaybackTuning, recommendSoundFontMdrDelayMs, RemoteCatalogEntry, requiresStableMadrvProfileForHybridTracks, requiresStableMadrvProfileForSoundFont, resolveNextPlaylistIndex, resolvePlaylistInterTrackSilenceSeconds, resolveSoundFontMdrDelayProfile, resolveSoundFontMdrSyncResidualMs, resolveSoundFontMdrTimingComparisonDelay, setSoundFontMdrDelayProfile, SignalDeckAudio, stepSoundFontMdrDelayMs, timerBToEstimatedBpm, updateSoundFontMdrDelayMeasurement, type MdrMidiSyncSnapshot, type MdrTrackKeyState, type PlaybackLoadProbe, type PlaybackPerformanceProfile, type PlaybackTuningPreset, type PlaybackTuningRecommendation, type SoundFontMdrDelayMeasurement, type SoundFontMdrDelayProfiles, type SoundFontMdrTimingComparisonMode } from "@/lib/madrvEngine";
+import { compileMml, extractMmlInitialTempo, fetchRemoteCatalog, fetchRemoteSoundFont, fetchSharedSoundFont, formatMidiNoteName, formatPdxFileName, inspectMadrvSource, inspectMdr, inspectMdx, isGoogleDriveShareUrl, isGsMidiEngineArmed, isMidiPlaybackDestinationReady, isOpmPcmEngineArmed, isPcmPdxEngineArmed, isPcmVoiceActive, isSafariBrowserUserAgent, isSignedTimingCorrectionDraft, limitScore, listMdrMixerTracks, listMdxMixerTracks, mdrRequiresPdx, MdrInfo, MdrMixerTrack, MdxInfo, MidiDiagnosticEntry, MidiOutputDevice, MmlSyntaxError, normalizeExternalMidiAdvanceMs, normalizeRemoteAssetUrl, normalizeSoundFontMdrDelayMs, normalizeSoundFontMdrDelayProfiles, parseRemoteCatalogPayload, recommendPlaybackTuning, recommendSoundFontMdrDelayMs, RemoteCatalogEntry, requiresStableMadrvProfileForHybridTracks, requiresStableMadrvProfileForSoundFont, resolveNextPlaylistIndex, resolvePlaylistInterTrackSilenceSeconds, resolveSoundFontMdrDelayProfile, resolveSoundFontMdrSyncResidualMs, resolveSoundFontMdrTimingComparisonDelay, setSoundFontMdrDelayProfile, SignalDeckAudio, stepSoundFontMdrDelayMs, timerBToEstimatedBpm, updateSoundFontMdrDelayMeasurement, type MdrMidiSyncSnapshot, type MdrTrackKeyState, type PlaybackLoadProbe, type PlaybackPerformanceProfile, type PlaybackTuningPreset, type PlaybackTuningRecommendation, type SoundFontMdrDelayMeasurement, type SoundFontMdrDelayProfiles, type SoundFontMdrTimingComparisonMode } from "@/lib/madrvEngine";
 import { DEFAULT_PLAYLIST_LOOP_COUNT, isPersistablePlaylistEntry, movePlaylistEntry, normalizePlaylistLoopCount, parseSavedPlaylist, SAVED_PLAYLIST_STORAGE_KEY, setPlaylistEntryLoopCount, updateRemotePlaylistTitle, type SavedPlaylistEntry } from "@/lib/playlistEntries";
 import { parseRecentSources, RECENT_SOURCES_STORAGE_KEY, removeRecentSource, upsertRecentSource, type RecentSource } from "@/lib/recentSources";
 import { persistLocalSoundFontSelection, persistRemoteSoundFontSelection, readCachedLocalSoundFont, readPersistedSoundFontSelection } from "@/lib/soundFontStorage";
@@ -952,14 +952,8 @@ export default function Home() {
     audio().setMdrMutedTracks([]);
   }
 
-  function initializeMdxMixer(hasPdx: boolean) {
-    const tracks: MdrMixerTrack[] = Array.from({ length: 16 }, (_, index) => ({
-      index,
-      engine: index < 8 ? "opm" : "pcm",
-      label: index < 8 ? `OPM ${index + 1}` : `PCM ${index - 7}`,
-      active: index < 8 || hasPdx,
-      ...(index >= 8 ? { pcmVoice: index - 7 } : {}),
-    }));
+  function initializeMdxMixer(source: ArrayBuffer, hasPdx: boolean) {
+    const tracks = listMdxMixerTracks(source, hasPdx);
     setMixerTracks(tracks);
     setMutedTracks([]);
     setSoloTrack(null);
@@ -1045,7 +1039,7 @@ export default function Home() {
         setLocalPdxAutoMatched(Boolean(matchingPdx));
         setMdrInfo(null);
         setMdrEstimatedDuration(null);
-        initializeMdxMixer(Boolean(matchingPdx?.data));
+        initializeMdxMixer(sourceBuffer!, Boolean(matchingPdx?.data));
         setFileName(mdxFile.name);
         setPlaylistEntries((current) => current.map((entry) => entry.origin === "local" && fileStem(entry.path ?? entry.title) === fileStem(mdxFile.name) ? { ...entry, source: sourceBuffer!, pdx: matchingPdx?.data, pdxName: matchingPdx?.name, requiredPdxName, format: "mdx" } : entry));
         rememberRecentSource({ id: `local:${mdxFile.name.toLowerCase()}`, kind: "local", label: mdxFile.name, format: "mdx", pdxName: matchingPdx?.name ?? (requiredPdxName || undefined) });
@@ -1058,7 +1052,7 @@ export default function Home() {
           setLocalPdx(matchingPdx.data);
           setLocalPdxFileName(matchingPdx.name);
           setLocalPdxAutoMatched(localSourceFormat === "mdx");
-          if (localSourceFormat === "mdx") initializeMdxMixer(true);
+          if (localSourceFormat === "mdx" && localMdr) initializeMdxMixer(localMdr, true);
           if (localSourceFormat === "mdr" && localMdr) resetMdrEstimatedDuration();
           const modeLabel = localSourceFormat === "mdx" ? "必要PDXとして自動選択しました。" : "MDRと組み合わせて完全再生します。";
           setNotice(`PDX「${matchingPdx.name}」を追加しました。${modeLabel}`);
@@ -1407,7 +1401,7 @@ export default function Home() {
         void diagnoseLoadedSource(source, pdx, 8, 0);
         setMdrInfo(null);
         setMdrEstimatedDuration(null);
-        initializeMdxMixer(Boolean(pdx));
+        initializeMdxMixer(source, Boolean(pdx));
       }
       setRemoteSource({ source, pdx, format: detected.format, title });
       setRemoteMdr(mdrUrl.trim());
@@ -1605,7 +1599,7 @@ export default function Home() {
           setMdrEstimatedDuration(null);
           setLocalMdxInfo(info);
           setLocalMdxPdxName(entry.requiredPdxName ?? "");
-          initializeMdxMixer(Boolean(entry.pdx));
+          initializeMdxMixer(entry.source, Boolean(entry.pdx));
         }
       } else {
         setMode("local");

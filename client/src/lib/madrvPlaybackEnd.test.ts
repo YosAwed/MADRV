@@ -112,6 +112,7 @@ function createHarness(sampleRate = 48_000) {
     start: vi.fn(),
     setChannelMask: vi.fn(),
     getPcmActiveMask: vi.fn(() => 0),
+    getPcmSampleNumbers: vi.fn((): (number | null)[] => []),
     getHardwareTrackMidiNote: vi.fn(() => null),
     getTimerB: vi.fn(() => 200),
     load: vi.fn(async () => ({ duration: hardware.duration, format: "MDR / OPM + PDX" })),
@@ -683,6 +684,36 @@ describe("finite MDR transport completion", () => {
     h.internal.reportHardwareTrackKeysFromRaw([-1]);
     h.advance(34);
     expect(keys).toHaveBeenLastCalledWith({});
+  });
+
+  it("preserves short PCM gaps and captured sample numbers inside mobile audio blocks", () => {
+    const h = createHarness();
+    const activity = vi.fn();
+    const samples = vi.fn();
+    h.engine.setPcmActivityListener(activity);
+    h.engine.setPcmSampleListener(samples);
+    activity.mockClear(); samples.mockClear();
+    let slice = -1;
+    const masks = [1, 0, 1, 0, 1, 0, 1, 0];
+    h.player.renderInto = vi.fn(() => { slice++; return 0; });
+    h.player.getPcmActiveMask = vi.fn(() => masks[slice]);
+    h.player.getPcmSampleNumbers = vi.fn(() => [masks[slice] ? slice / 2 : null]);
+    h.forceAudioTime(undefined);
+    h.internal.renderMdrOutputBlock(new Float32Array(16384), new Float32Array(16384), 0);
+    expect(h.player.renderInto).toHaveBeenCalledTimes(8);
+    expect(activity).not.toHaveBeenCalled();
+    h.advance(350);
+    expect(activity.mock.calls.map(([mask]) => mask)).toEqual(masks);
+    expect(samples.mock.calls.map(([snapshot]) => snapshot[0])).toEqual([0, null, 1, null, 2, null, 3, null]);
+    // A mute followed by unmute must not revive already buffered PCM hits.
+    slice = -1;
+    h.internal.renderMdrOutputBlock(new Float32Array(2048), new Float32Array(2048), 1);
+    h.engine.setMdrMutedTracks([8]);
+    h.engine.setMdrMutedTracks([]);
+    activity.mockClear(); samples.mockClear();
+    h.advance(1000);
+    expect(activity).not.toHaveBeenCalled();
+    expect(samples).not.toHaveBeenCalled();
   });
 
   it("publishes OPM key transitions inside a large output block", () => {
