@@ -6,6 +6,8 @@ The user reported that the affected device's Chrome was outdated and requested r
 
 Reversion validation: all 216 tests passed (18 files), both TypeScript checks passed, and the Cloudflare production build passed with the existing chunk-size warning. The two restored application files have no diff against `09e5e78`.
 
+Reversion source commit `e07bf66` was pushed to main and deployed to production as version `74b0f58a-e8be-4515-b893-b7ab3f2619c8`. Production HTML, main JS, CSS, player WASM and SoundFont worklet matched the local restored build byte for byte. A mobile-sized desktop Chrome check confirmed that tapping the restored arrow and Folder / playlist button emits the appropriate file/folder chooser events, the fallback section is absent, and there are no page errors. No music files were loaded or sent; this check does not emulate Android's native picker. Staging was not redeployed.
+
 ## Updated report
 
 The native picker mitigation still did not open a picker on the affected carrier Xperia 5 V. Both file and folder controls failed. The owner reports Chrome and Android are current for the device (exact version numbers unknown). Other apps can select files via an intermediate Files icon, so this is not evidence that all device file selection is broken. No physical Xperia trace has been captured, and no carrier-specific cause is established.
