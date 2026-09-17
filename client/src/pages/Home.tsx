@@ -1,6 +1,6 @@
 import { CompactPanel, type CompactPanelHandle } from "@/components/CompactPanel";
 import { PlaybackPosition } from "@/components/PlaybackPosition";
-import { PcmActivityStrip } from "@/components/PcmActivityStrip";
+import { PcmPadBank } from "@/components/PcmPadBank";
 /* Compact Signal Deck: persistent playback controls and independently folding sections. */
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { Button } from "@/components/ui/button";
@@ -364,6 +364,7 @@ export default function Home() {
   const [mixOutputPeak, setMixOutputPeak] = useState(0);
   const [pcmActivityMask, setPcmActivityMask] = useState(0);
   const [pcmSamples, setPcmSamples] = useState<readonly (number | null)[]>([]);
+  const [pcmPans, setPcmPans] = useState<readonly (number | null)[]>([]);
   const [remoteSource, setRemoteSource] = useState<{ source: ArrayBuffer; pdx?: ArrayBuffer; format: "mdr" | "mdx"; title: string } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -818,6 +819,7 @@ export default function Home() {
     player.setOutputPeakListener(setMixOutputPeak);
     player.setPcmActivityListener(setPcmActivityMask);
     player.setPcmSampleListener(setPcmSamples);
+    player.setPcmPanListener(setPcmPans);
     player.setMdrTrackKeyListener(setTrackKeyState);
     player.setTimerBListener(setTimerB);
     player.setHardwarePlaybackPositionListener(setHardwarePlaybackPositionMs);
@@ -827,6 +829,7 @@ export default function Home() {
       player.setOutputPeakListener(undefined);
       player.setPcmActivityListener(undefined);
       player.setPcmSampleListener(undefined);
+      player.setPcmPanListener(undefined);
       player.setMdrTrackKeyListener(undefined);
       player.setTimerBListener(undefined);
       player.setHardwarePlaybackPositionListener(undefined);
@@ -966,6 +969,25 @@ export default function Home() {
     setMutedTracks(unique);
     audio().setMdrMutedTracks(unique);
     if (message) setNotice(message);
+  }
+
+  function togglePcmPadMute(tracks: readonly MdrMixerTrack[]) {
+    if (!tracks.length) return;
+    setSoloTrack(null);
+    const indexes = tracks.map(track => track.index);
+    const allMuted = indexes.every(index => mutedTracks.includes(index));
+    applyMutedTracks(allMuted ? mutedTracks.filter(index => !indexes.includes(index)) : [...mutedTracks, ...indexes]);
+  }
+
+  function togglePcmPadSolo(tracks: readonly MdrMixerTrack[]) {
+    if (!tracks.length) return;
+    if (tracks.some(track => track.index === soloTrack)) {
+      setSoloTrack(null);
+      applyMutedTracks([]);
+    } else {
+      setSoloTrack(tracks[0].index);
+      applyMutedTracks(mixerTracks.filter(track => !tracks.some(padTrack => padTrack.index === track.index)).map(track => track.index));
+    }
   }
 
   function toggleTrackMute(track: MdrMixerTrack) {
@@ -1992,6 +2014,7 @@ export default function Home() {
                   {ENGINE_BUS_ORDER.map((engine) => {
                     const busTracks = mixerTracksByEngine[engine];
                     if (!busTracks.length || (keyboardEngineFilter !== "all" && keyboardEngineFilter !== engine)) return null;
+                    if (engine === "pcm") return <PcmPadBank key={engine} tracks={busTracks} mask={pcmActivityMask} samples={pcmSamples} pans={pcmPans} running={isPlaying && !playbackLoading} mutedTracks={mutedTracks} soloTrack={soloTrack} onMute={togglePcmPadMute} onSolo={togglePcmPadSolo} />;
                     const notes = mergeEngineBusNotes(busTracks, trackKeyState, mutedTracks, engine);
                     const meta = ENGINE_BUS_META[engine];
                     const lit = notes.map((note) => formatMidiNoteName(note)).join(" ");
@@ -2002,29 +2025,26 @@ export default function Home() {
                         <p className="mono m-0 mt-0.5 text-[7px] uppercase tracking-[0.08em] text-[#8b9085]">{busTracks.length} ch{mutedBusCount ? ` · ${mutedBusCount}m` : ""}</p>
                       </div>
                       <span className={`mono matrix-note-label text-[11px] font-semibold tracking-tight ${lit ? "text-primary" : "text-[#6f746a]"}`} title={lit || "Awaiting"}>{summarizeKeyboardNotes(lit) || "·"}</span>
-                      {engine === "pcm" ? <div className="matrix-pcm-pads">{busTracks.map(track => {
-                        const muted = mutedTracks.includes(track.index);
-                        const active = !muted && isPcmVoiceActive(pcmActivityMask, track.pcmVoice ?? 1);
-                        return <span key={track.index} className={`mono matrix-pcm-pad${active ? " is-active" : ""}`} title={`${track.label}${muted ? " · ミュート" : active ? " · 発音中" : " · 待機"}`}>{track.label}</span>;
-                      })}</div> : <TrackFullKeyboard label={meta.label} midiNotes={notes} muted={false} dense={false} />}
+                      <TrackFullKeyboard label={meta.label} midiNotes={notes} muted={false} dense={false} />
                     </div>;
                   })}
                 </div>
               ) : (
                 <div className="mt-2 flex flex-col gap-px bg-white/10" data-testid="keyboard-matrix-tracks">
                   {visibleMixerTracks.map((track) => {
+                    if (track.engine === "pcm") {
+                      if (track !== mixerTracksByEngine.pcm[0]) return null;
+                      return <PcmPadBank key="pcm" tracks={mixerTracksByEngine.pcm} mask={pcmActivityMask} samples={pcmSamples} pans={pcmPans} running={isPlaying && !playbackLoading} mutedTracks={mutedTracks} soloTrack={soloTrack} onMute={togglePcmPadMute} onSolo={togglePcmPadSolo} />;
+                    }
                     const muted = mutedTracks.includes(track.index);
                     const solo = soloTrack === track.index;
-                    const isPad = track.engine === "pcm";
-                    const tone = track.engine === "opm" ? "text-primary" : isPad ? "text-[#b9c9b1]" : "text-[#a8c5ec]";
+                    const tone = track.engine === "opm" ? "text-primary" : "text-[#a8c5ec]";
                     const keys = trackKeyState[track.index] ?? emptyMidiNotes;
-                    const lit = isPad ? "" : (!muted && keys.length > 0 ? keys.map((note) => formatMidiNoteName(note)).join(" ") : "");
+                    const lit = !muted && keys.length > 0 ? keys.map((note) => formatMidiNoteName(note)).join(" ") : "";
                     return <div key={track.index} data-keyboard-engine={track.engine} data-testid={`keyboard-track-${track.index}`} className={`flex items-center gap-1.5 bg-[#11120f] px-1.5 py-1 ${muted ? "opacity-55" : ""}`}>
                       <p className={`mono m-0 w-[3.6rem] shrink-0 truncate text-[9px] font-medium ${tone}`} title={track.label}>{track.label}</p>
-                      <span className={`mono matrix-note-label text-[11px] font-semibold tracking-tight ${muted ? "text-[#ff9b94]" : lit ? "text-primary" : "text-[#6f746a]"}`} title={lit || (muted ? "Muted" : isPad ? "Pad · live keyboard" : "Awaiting")}>{muted ? "MUTE" : isPad ? "PAD" : summarizeKeyboardNotes(lit) || "·"}</span>
-                      {isPad
-                        ? <PcmActivityStrip label={track.label} active={isPcmVoiceActive(pcmActivityMask, track.pcmVoice ?? 1)} sampleNumber={pcmSamples[(track.pcmVoice ?? 1) - 1] ?? null} muted={muted} running={isPlaying && !playbackLoading} source={mode === "remote" ? remoteSource?.source : localMdr} />
-                        : <TrackFullKeyboard label={track.label} midiNotes={keys} muted={muted} />}
+                      <span className={`mono matrix-note-label text-[11px] font-semibold tracking-tight ${muted ? "text-[#ff9b94]" : lit ? "text-primary" : "text-[#6f746a]"}`} title={lit || (muted ? "Muted" : "Awaiting")}>{muted ? "MUTE" : summarizeKeyboardNotes(lit) || "·"}</span>
+                      <TrackFullKeyboard label={track.label} midiNotes={keys} muted={muted} />
                       <div className="flex shrink-0 gap-0.5">
                         <button type="button" aria-label={`${track.label}のミュートを${muted ? "オフ" : "オン"}にする`} aria-pressed={muted} onClick={() => toggleTrackMute(track)} className={`mono border px-1 py-0.5 text-[7px] tracking-[0.06em] ${muted ? "border-[#ff746c] bg-[#52241f]/30 text-[#ffb0a8]" : "border-white/20 text-[#dfe1d8] hover:border-primary hover:text-primary"}`} title={muted ? "Mute on" : "Mute off"}>{muted ? "M*" : "M"}</button>
                         <button type="button" aria-label={`${track.label}を${solo ? "ソロ解除" : "ソロ"}にする`} aria-pressed={solo} onClick={() => toggleTrackSolo(track)} className={`mono border px-1 py-0.5 text-[7px] tracking-[0.06em] ${solo ? "border-primary bg-primary text-primary-foreground" : "border-white/20 text-[#dfe1d8] hover:border-primary hover:text-primary"}`}>S</button>

@@ -113,6 +113,7 @@ function createHarness(sampleRate = 48_000) {
     setChannelMask: vi.fn(),
     getPcmActiveMask: vi.fn(() => 0),
     getPcmSampleNumbers: vi.fn((): (number | null)[] => []),
+    getPcmPans: vi.fn((): (number | null)[] => []),
     getHardwareTrackMidiNote: vi.fn(() => null),
     getTimerB: vi.fn(() => 200),
     load: vi.fn(async () => ({ duration: hardware.duration, format: "MDR / OPM + PDX" })),
@@ -690,14 +691,17 @@ describe("finite MDR transport completion", () => {
     const h = createHarness();
     const activity = vi.fn();
     const samples = vi.fn();
+    const pans = vi.fn();
     h.engine.setPcmActivityListener(activity);
     h.engine.setPcmSampleListener(samples);
-    activity.mockClear(); samples.mockClear();
+    h.engine.setPcmPanListener(pans);
+    activity.mockClear(); samples.mockClear(); pans.mockClear();
     let slice = -1;
     const masks = [1, 0, 1, 0, 1, 0, 1, 0];
     h.player.renderInto = vi.fn(() => { slice++; return 0; });
     h.player.getPcmActiveMask = vi.fn(() => masks[slice]);
     h.player.getPcmSampleNumbers = vi.fn(() => [masks[slice] ? slice / 2 : null]);
+    h.player.getPcmPans = vi.fn(() => [masks[slice] ? (slice / 2) % 3 + 1 : null]);
     h.forceAudioTime(undefined);
     h.internal.renderMdrOutputBlock(new Float32Array(16384), new Float32Array(16384), 0);
     expect(h.player.renderInto).toHaveBeenCalledTimes(8);
@@ -705,15 +709,17 @@ describe("finite MDR transport completion", () => {
     h.advance(350);
     expect(activity.mock.calls.map(([mask]) => mask)).toEqual(masks);
     expect(samples.mock.calls.map(([snapshot]) => snapshot[0])).toEqual([0, null, 1, null, 2, null, 3, null]);
+    expect(pans.mock.calls.map(([snapshot]) => snapshot[0])).toEqual([1, null, 2, null, 3, null, 1, null]);
     // A mute followed by unmute must not revive already buffered PCM hits.
     slice = -1;
     h.internal.renderMdrOutputBlock(new Float32Array(2048), new Float32Array(2048), 1);
     h.engine.setMdrMutedTracks([8]);
     h.engine.setMdrMutedTracks([]);
-    activity.mockClear(); samples.mockClear();
+    activity.mockClear(); samples.mockClear(); pans.mockClear();
     h.advance(1000);
     expect(activity).not.toHaveBeenCalled();
     expect(samples).not.toHaveBeenCalled();
+    expect(pans).not.toHaveBeenCalled();
   });
 
   it("publishes OPM key transitions inside a large output block", () => {
