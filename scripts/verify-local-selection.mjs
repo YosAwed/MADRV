@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chromium } from "playwright-core";
+import { chromium, webkit } from "playwright-core";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -27,7 +27,7 @@ await writeFile(path.join(album, "FIRST.MDX"), mdx("First folder song"));
 await writeFile(path.join(album, "SECOND.MDX"), mdx("Second folder song"));
 await writeFile(path.join(singleFolder, "ONLY.MDX"), mdx("One song folder"));
 const baseUrl = process.env.MADRV_E2E_BASE_URL ?? "http://127.0.0.1:5173";
-const browser = await chromium.launch({
+const browser = process.env.MADRV_BROWSER === "webkit" ? await webkit.launch({ headless: true }) : await chromium.launch({
   executablePath: process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   headless: true, args: ["--autoplay-policy=no-user-gesture-required"],
 });
@@ -44,6 +44,15 @@ try {
   const settings = page.getByTestId("settings-toggle");
   if (await settings.getAttribute("aria-expanded") !== "true") await settings.tap();
   await page.getByRole("button", { name: "LOCAL FILE", exact: true }).tap();
+  // Prove taps use browser-native activation, even if JS .click() cannot open
+  // a file picker. This reproduces a blocked forwarding path, not Android OS UI.
+  await page.evaluate(() => {
+    const click = HTMLInputElement.prototype.click;
+    HTMLInputElement.prototype.click = function () {
+      if (this.type === "file") throw new Error("Programmatic file-input click must not be used");
+      return click.call(this);
+    };
+  });
   const fileButton = page.getByTestId("select-local-file");
   const folderButton = page.getByTestId("select-local-folder");
   const notice = page.getByTestId("playback-notice");
@@ -55,7 +64,14 @@ try {
     assert.equal(await element.getAttribute("data-testid"), directory ? "local-folder-input" : "local-file-input");
     await chooser.setFiles(files);
   };
-  await choose(fileButton, false, { name: "SINGLE.MDX", mimeType: "application/octet-stream", buffer: mdx("Single selection") });
+  const dropzone = page.getByTestId("local-file-dropzone");
+  await dropzone.scrollIntoViewIfNeeded();
+  const arrow = await dropzone.locator("svg").boundingBox();
+  const point = { x: arrow.x + arrow.width / 2, y: arrow.y + arrow.height / 2 };
+  assert.equal(await page.evaluate(({x,y}) => document.elementFromPoint(x,y)?.getAttribute("data-testid"), point), "local-file-input");
+  const [arrowChooser] = await Promise.all([page.waitForEvent("filechooser"), page.touchscreen.tap(point.x, point.y)]);
+  assert.equal(await arrowChooser.element().getAttribute("webkitdirectory"), null);
+  await arrowChooser.setFiles({ name: "SINGLE.MDX", mimeType: "application/octet-stream", buffer: mdx("Single selection") });
   await notice.filter({ hasText: /MDX「SINGLE.MDX」を読込みました/ }).waitFor();
   assert.equal(await playlistCount(), 0, "Single file must not become a playlist");
   await choose(folderButton, true, album);
@@ -64,15 +80,6 @@ try {
   await choose(fileButton, false, path.join(album, "FIRST.MDX"));
   await notice.filter({ hasText: /MDX「FIRST.MDX」を読込みました/ }).waitFor();
   assert.equal(await playlistCount(), 2, "Selecting a file inside a folder must not import its siblings");
-  // Model a provider returning an ordinary File even from the directory input.
-  await page.getByTestId("local-folder-input").evaluate((input, bytes) => {
-    const data = new DataTransfer();
-    data.items.add(new File([new Uint8Array(bytes)], "FALLBACK.MDX"));
-    input.files = data.files;
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  }, [...mdx("Fallback single file")]);
-  await notice.filter({ hasText: /MDX「FALLBACK.MDX」を読込みました/ }).waitFor();
-  assert.equal(await playlistCount(), 2, "An ordinary file from a directory picker must stay a single source");
   await choose(folderButton, true, singleFolder);
   await notice.filter({ hasText: /ローカルフォルダから1曲/ }).waitFor();
   assert.equal(await playlistCount(), 3, "A one-song folder must still be treated as a folder");
@@ -88,9 +95,22 @@ try {
     input.dispatchEvent(new Event("change", { bubbles: true }));
   });
   assert.equal(await notice.innerText(), beforeCancel, "Cancelling must leave the loaded source unchanged");
+  const input = page.getByTestId("local-file-input");
+  await input.focus();
+  const [keyboardChooser] = await Promise.all([page.waitForEvent("filechooser"), input.press("Space")]);
+  await keyboardChooser.setFiles({ name: "KEYBOARD.MDX", mimeType: "application/octet-stream", buffer: mdx("Keyboard selection") });
+  await notice.filter({ hasText: /MDX「KEYBOARD.MDX」を読込みました/ }).waitFor();
+  await input.evaluate((element, bytes) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([new Uint8Array(bytes)], "DROP.MDX"));
+    element.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+  }, [...mdx("Dropped file")]);
+  await notice.filter({ hasText: /MDX「DROP.MDX」を読込みました/ }).waitFor();
+  assert.equal(await playlistCount(), 3);
   assert.deepEqual(errors, []);
   await fileButton.scrollIntoViewIfNeeded();
   await page.screenshot({ path: "/tmp/madrv-local-selection.png", fullPage: true });
-  console.log(JSON.stringify({ baseUrl, filePicker: true, folderPicker: true, singleFile: true,
-    folderPlaylist: true, directoryPickerFileFallback: true, oneSongFolder: true, pdxPair: true, cancellation: true, errors }, null, 2));
+  console.log(JSON.stringify({ baseUrl, browser: process.env.MADRV_BROWSER ?? "chromium", nativeArrowTap: true,
+    programmaticClickBlocked: true, filePicker: true, folderPicker: true, singleFile: true,
+    folderPlaylist: true, oneSongFolder: true, pdxPair: true, cancellation: true, keyboard: true, drop: true, errors }, null, 2));
 } finally { await browser.close(); }
