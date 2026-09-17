@@ -107,10 +107,32 @@ try {
   }, [...mdx("Dropped file")]);
   await notice.filter({ hasText: /MDX「DROP.MDX」を読込みました/ }).waitFor();
   assert.equal(await playlistCount(), 3);
+  await page.getByTestId("local-file-fallback").locator("summary").tap();
+  const fallback = page.getByTestId("local-file-fallback-input");
+  for (const attribute of ["accept", "multiple", "webkitdirectory", "directory"]) {
+    assert.equal(await fallback.getAttribute(attribute), null, `Fallback must omit ${attribute}`);
+  }
+  const selectFallback = async file => {
+    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), fallback.tap({ position: { x: 20, y: 15 } })]);
+    assert.equal(chooser.isMultiple(), false);
+    assert.equal(await chooser.element().getAttribute("data-testid"), "local-file-fallback-input");
+    await chooser.setFiles(file);
+  };
+  await selectFallback({ name: "COMPAT.MDX", mimeType: "application/octet-stream", buffer: mdx("Compatibility selection", "COMPAT") });
+  await notice.filter({ hasText: /PDX「COMPAT.PDX」を追加してください/ }).waitFor();
+  await selectFallback({ name: "COMPAT.PDX", mimeType: "application/octet-stream", buffer: Buffer.alloc(768) });
+  await notice.filter({ hasText: /PDX「COMPAT.PDX」を追加しました/ }).waitFor();
+  const pairedTitle = await page.getByTestId("source-title").innerText();
+  await selectFallback({ name: "UNSUPPORTED.txt", mimeType: "text/plain", buffer: Buffer.from("Not a song") });
+  await notice.filter({ hasText: "MDR、MDX、またはPDXファイルを選択してください。" }).waitFor();
+  assert.equal(await page.getByTestId("source-title").innerText(), pairedTitle);
+  assert.equal(await playlistCount(), 3);
   assert.deepEqual(errors, []);
   await fileButton.scrollIntoViewIfNeeded();
   await page.screenshot({ path: "/tmp/madrv-local-selection.png", fullPage: true });
+  await page.getByTestId("local-file-fallback").screenshot({ path: "/tmp/madrv-file-picker-fallback.png" });
   console.log(JSON.stringify({ baseUrl, browser: process.env.MADRV_BROWSER ?? "chromium", nativeArrowTap: true,
     programmaticClickBlocked: true, filePicker: true, folderPicker: true, singleFile: true,
-    folderPlaylist: true, oneSongFolder: true, pdxPair: true, cancellation: true, keyboard: true, drop: true, errors }, null, 2));
+    folderPlaylist: true, oneSongFolder: true, pdxPair: true, cancellation: true, keyboard: true, drop: true,
+    plainSingleFileFallback: true, fallbackPdxAddition: true, unsupportedFileRejected: true, errors }, null, 2));
 } finally { await browser.close(); }

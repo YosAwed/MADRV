@@ -2065,7 +2065,16 @@ export default function Home() {
     <input data-testid="local-folder-input" aria-label="フォルダを選択" type="file" multiple {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} className="local-source-input" onChange={selectFolder} />
   </label>
   <HelpTooltip label="音源ファイルの選択">ファイル選択では選んだ曲を開きます。MDR／MDXとPDXは同時選択、または後から追加できます。フォルダ選択ではフォルダ内の曲をプレイリストへ追加します。</HelpTooltip>
-</div></div>}
+</div>
+<details data-testid="local-file-fallback" className="mt-3 text-[11px] text-[#a9aca2]">
+  <summary className="cursor-pointer py-2 text-primary">ファイル選択が開かない場合</summary>
+  <label className="mt-2 block" htmlFor="local-source-fallback">1ファイルずつ選択（種類の絞り込みなし）</label>
+  <input id="local-source-fallback" data-testid="local-file-fallback-input" type="file" onChange={selectSource}
+    className="mt-2 block w-full min-w-0 text-[12px] file:mr-2 file:cursor-pointer file:border file:border-primary/45 file:bg-[#11120f] file:px-3 file:py-2 file:text-primary" />
+  <p className="mt-2 leading-relaxed">MDR／MDXを選んでください。必要なPDXは、続けて同じボタンから追加できます。</p>
+  <p className="mt-1 leading-relaxed">「ファイル」のアイコンが出た場合は、それを選択して保存先を開いてください。</p>
+</details>
+</div>}
               {mode === "remote" && <div className="compact-source-form"><div><div className="flex items-center justify-between gap-3"><SmallLabel help={<>通常URLはCORS応答が必要です。Google Drive／Dropboxの<strong>公開共有リンク</strong>は、このサービスの許可済み取得経路で読み込むためブラウザ側CORSに依存しません。ログイン必須・閲覧制限・ダウンロード禁止のファイルは取得しません。</>}>Remote MDR / MDX URL</SmallLabel>{isCloudShareLink(remoteMdr) && <span className="mono text-[9px] uppercase tracking-[0.09em] text-primary">Share proxy ready</span>}</div><input value={remoteMdr} onChange={(event) => setRemoteMdr(event.target.value)} placeholder="https://storage.example/song.mdr または song.mdx／Drive・Dropbox共有リンク" className="mono mt-2 w-full border border-white/15 bg-[#11120f] px-3 py-3 text-xs text-[#f5f4ec] outline-none placeholder:text-[#62675d] focus:border-primary" /></div>
 <div><div className="flex items-center justify-between gap-3"><SmallLabel>Companion PDX URL / optional</SmallLabel>{isCloudShareLink(remotePdx) && <span className="mono text-[9px] uppercase tracking-[0.09em] text-primary">Share proxy ready</span>}</div><input value={remotePdx} onChange={(event) => setRemotePdx(event.target.value)} placeholder="https://storage.example/song.pdx または Drive／Dropbox共有リンク" className="mono mt-2 w-full border border-white/15 bg-[#11120f] px-3 py-3 text-xs text-[#f5f4ec] outline-none placeholder:text-[#62675d] focus:border-primary" /></div>
 <div className="flex items-center gap-2"><Button onClick={loadRemote} disabled={remoteLoading} className="h-9 rounded-none bg-primary px-3 text-[10px] font-semibold text-primary-foreground hover:bg-[#e5ff76]">{remoteLoading ? <LoaderCircle size={14} className="animate-spin" /> : <CloudDownload size={14} />}{remoteLoading ? "Loading" : "Load source"}</Button></div>
