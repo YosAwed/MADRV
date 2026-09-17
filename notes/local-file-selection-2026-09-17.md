@@ -42,3 +42,6 @@ The user explicitly requested production deployment because the affected person 
 - At the production URL, generated-fixture Chromium tests passed for the actual arrow hit target, native file/folder choosers with scripted click blocked, single-file loading, folder playlists, MDX/PDX pairing, cancellation, keyboard and drop. No page errors. This does not replace the affected Android OS picker test.
 
 This production release record is a documentation-only commit after the deployed source revision.
+# Reversion notice
+
+The user subsequently identified outdated Chrome on the affected device and requested reverting these mitigations. The local-selection UI and handlers were restored to `09e5e78`; see `file-picker-fallback-2026-09-17.md`. The preceding mitigation and deployment records are historical.

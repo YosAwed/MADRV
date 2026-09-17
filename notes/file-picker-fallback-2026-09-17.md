@@ -1,5 +1,11 @@
 # Plain single-file picker fallback — 2026-09-17
 
+## Reverted after user diagnosis
+
+The user reported that the affected device's Chrome was outdated and requested restoring the previous behavior. Restored `Home.tsx` and `compact.css` exactly to the pre-mitigation revision `09e5e78` and removed the mitigation-specific browser verification script. This removes both the native overlay changes and the additional fallback controls; playback seeking and the earlier production improvements remain intact. The deployment records below describe the historical mitigation releases, not the restored UI.
+
+Reversion validation: all 216 tests passed (18 files), both TypeScript checks passed, and the Cloudflare production build passed with the existing chunk-size warning. The two restored application files have no diff against `09e5e78`.
+
 ## Updated report
 
 The native picker mitigation still did not open a picker on the affected carrier Xperia 5 V. Both file and folder controls failed. The owner reports Chrome and Android are current for the device (exact version numbers unknown). Other apps can select files via an intermediate Files icon, so this is not evidence that all device file selection is broken. No physical Xperia trace has been captured, and no carrier-specific cause is established.

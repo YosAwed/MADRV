@@ -491,6 +491,8 @@ export default function Home() {
   const [mdrEstimatedDuration, setMdrEstimatedDuration] = useState<number | null | undefined>(null);
   const [elapsed, setElapsed] = useState(0);
   const [duration, setDuration] = useState(0);
+  const sourceInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const sf2InputRef = useRef<HTMLInputElement>(null);
   const soundFontBankButtonRef = useRef<HTMLButtonElement>(null);
   const soundFontPanelRef = useRef<CompactPanelHandle>(null);
@@ -1110,15 +1112,13 @@ export default function Home() {
   }
 
   async function selectSource(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.currentTarget.files ?? []);
-    event.currentTarget.value = "";
-    if (files.length) await loadLocalFiles(files);
+    await loadLocalFiles(Array.from(event.target.files ?? []));
+    event.target.value = "";
   }
 
   async function selectFolder(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.currentTarget.files ?? []);
-    event.currentTarget.value = "";
-    if (files.length) await loadLocalFolder(files);
+    await loadLocalFolder(Array.from(event.target.files ?? []));
+    event.target.value = "";
   }
 
   async function selectSoundFont(event: ChangeEvent<HTMLInputElement>) {
@@ -2055,26 +2055,12 @@ export default function Home() {
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-3"><button onClick={() => { setMml(defaultMml); setMmlError(null); }} className="mono inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-[#d8ff3e] hover:underline"><RotateCcw size={12} />Restore sample</button></div>
                     {mmlError && <p className="mono mt-3 border-l-2 border-[#ff746c] bg-[#ff746c]/10 px-3 py-2 text-[10px] leading-5 text-[#ffd6d2]">{mmlError}</p>}
                   </div>}
-              {mode === "local" && <div className="compact-source-form"><div data-testid="local-file-dropzone" onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={onDrop} className={`compact-dropzone relative grid place-items-center border border-dashed p-5 text-center transition-colors focus-within:border-primary ${isDragging ? "border-primary bg-primary/[0.07]" : "border-white/20 bg-[#11120f] hover:border-primary/60"}`}>
+              {mode === "local" && <div className="compact-source-form"><div onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={onDrop} onClick={() => sourceInputRef.current?.click()} role="button" tabIndex={0} aria-label="音源ファイルを選択" onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); sourceInputRef.current?.click(); } }} className={`compact-dropzone grid place-items-center border border-dashed p-5 text-center transition-colors ${isDragging ? "border-primary bg-primary/[0.07]" : "border-white/20 bg-[#11120f] hover:border-primary/60"}`}>
                       <div><div className="mx-auto grid h-12 w-12 place-items-center border border-primary/60 text-primary"><Upload size={20} /></div><p className="display mb-0 mt-5 text-xl font-semibold tracking-[-0.04em] text-[#f5f4ec]">{fileName ?? "MDR / MDX / PDXを置く"}</p></div>
-                      <input id="local-source-file" data-testid="local-file-input" aria-label="音源ファイルを選択" type="file" multiple accept=".mdr,.mdx,.pdx,application/octet-stream" className="local-source-input" onChange={selectSource} />
                     </div>
-<div className="mt-3 flex flex-wrap items-center gap-3">
-  <label htmlFor="local-source-file" data-testid="select-local-file" className="mono cursor-pointer shrink-0 border border-primary/45 bg-primary/[0.045] px-3 py-2 text-[10px] text-primary transition-colors hover:bg-primary hover:text-primary-foreground">ファイルを選択</label>
-  <label data-testid="select-local-folder" className="mono relative cursor-pointer shrink-0 border border-white/25 px-3 py-2 text-[10px] text-[#dfe1d8] transition-colors focus-within:border-primary hover:border-primary hover:text-primary">フォルダを選択
-    <input data-testid="local-folder-input" aria-label="フォルダを選択" type="file" multiple {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} className="local-source-input" onChange={selectFolder} />
-  </label>
-  <HelpTooltip label="音源ファイルの選択">ファイル選択では選んだ曲を開きます。MDR／MDXとPDXは同時選択、または後から追加できます。フォルダ選択ではフォルダ内の曲をプレイリストへ追加します。</HelpTooltip>
-</div>
-<details data-testid="local-file-fallback" className="mt-3 text-[11px] text-[#a9aca2]">
-  <summary className="cursor-pointer py-2 text-primary">ファイル選択が開かない場合</summary>
-  <label className="mt-2 block" htmlFor="local-source-fallback">1ファイルずつ選択（種類の絞り込みなし）</label>
-  <input id="local-source-fallback" data-testid="local-file-fallback-input" type="file" onChange={selectSource}
-    className="mt-2 block w-full min-w-0 text-[12px] file:mr-2 file:cursor-pointer file:border file:border-primary/45 file:bg-[#11120f] file:px-3 file:py-2 file:text-primary" />
-  <p className="mt-2 leading-relaxed">MDR／MDXを選んでください。必要なPDXは、続けて同じボタンから追加できます。</p>
-  <p className="mt-1 leading-relaxed">「ファイル」のアイコンが出た場合は、それを選択して保存先を開いてください。</p>
-</details>
-</div>}
+<input ref={sourceInputRef} type="file" multiple accept=".mdr,.mdx,.pdx,application/octet-stream" className="hidden" onChange={selectSource} />
+<input ref={folderInputRef} type="file" multiple {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} className="hidden" onChange={selectFolder} />
+<div className="mt-3 flex flex-wrap items-center gap-3"><HelpTooltip label="音源ファイルの選択">クリックしてファイルを選択、またはここへドラッグ。MDR／MDXとPDXは同時選択、または後から追加できます。</HelpTooltip><button onClick={() => folderInputRef.current?.click()} className="mono shrink-0 border border-primary/45 bg-primary/[0.045] px-3 py-2 text-[9px] uppercase tracking-[0.08em] text-primary transition-colors hover:bg-primary hover:text-primary-foreground">Folder / playlist</button></div></div>}
               {mode === "remote" && <div className="compact-source-form"><div><div className="flex items-center justify-between gap-3"><SmallLabel help={<>通常URLはCORS応答が必要です。Google Drive／Dropboxの<strong>公開共有リンク</strong>は、このサービスの許可済み取得経路で読み込むためブラウザ側CORSに依存しません。ログイン必須・閲覧制限・ダウンロード禁止のファイルは取得しません。</>}>Remote MDR / MDX URL</SmallLabel>{isCloudShareLink(remoteMdr) && <span className="mono text-[9px] uppercase tracking-[0.09em] text-primary">Share proxy ready</span>}</div><input value={remoteMdr} onChange={(event) => setRemoteMdr(event.target.value)} placeholder="https://storage.example/song.mdr または song.mdx／Drive・Dropbox共有リンク" className="mono mt-2 w-full border border-white/15 bg-[#11120f] px-3 py-3 text-xs text-[#f5f4ec] outline-none placeholder:text-[#62675d] focus:border-primary" /></div>
 <div><div className="flex items-center justify-between gap-3"><SmallLabel>Companion PDX URL / optional</SmallLabel>{isCloudShareLink(remotePdx) && <span className="mono text-[9px] uppercase tracking-[0.09em] text-primary">Share proxy ready</span>}</div><input value={remotePdx} onChange={(event) => setRemotePdx(event.target.value)} placeholder="https://storage.example/song.pdx または Drive／Dropbox共有リンク" className="mono mt-2 w-full border border-white/15 bg-[#11120f] px-3 py-3 text-xs text-[#f5f4ec] outline-none placeholder:text-[#62675d] focus:border-primary" /></div>
 <div className="flex items-center gap-2"><Button onClick={loadRemote} disabled={remoteLoading} className="h-9 rounded-none bg-primary px-3 text-[10px] font-semibold text-primary-foreground hover:bg-[#e5ff76]">{remoteLoading ? <LoaderCircle size={14} className="animate-spin" /> : <CloudDownload size={14} />}{remoteLoading ? "Loading" : "Load source"}</Button></div>
