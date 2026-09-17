@@ -19,3 +19,7 @@ User reported that non-PCM8 MDX (e.g. BOS15.MDX) showed eight PCM rows and an un
 - Chromium and WebKit with mobile viewport/touch/display scale: one PCM row, both sample numbers, approximately 30 ON/OFF transitions over five seconds, and 23 separate ranges in the rolling four-second history. Stop clears the history. Generated files only.
 - Existing PCM8/MDR Chromium and WebKit checks passed: eight banked sample identities, routed MDR source slots, 20 layout combinations, mute/solo, seek, stop and source replacement. No browser page errors.
 - Android hardware and the user's BOS15.MDX remain to be checked on staging. No production deployment for this follow-up fix.
+
+## Staging deployment
+
+Clean source `022d528d7fd7` on `codex/mdx-pcm-display` deployed to `https://madrv-player-staging.madrv-player-web.workers.dev/` as version `b24974cf-5fe5-4280-93cd-8d96c571c17b`. Public Chromium checks passed for ordinary ADPCM (one row, 30 ON/OFF transitions, 24 separate history ranges) and the full PCM8/routed-MDR check. Inspected the ordinary ADPCM screenshot. Build metadata matched the source and production still served `index-B5FNQP1n.js`.
