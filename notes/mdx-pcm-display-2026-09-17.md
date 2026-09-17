@@ -23,3 +23,9 @@ User reported that non-PCM8 MDX (e.g. BOS15.MDX) showed eight PCM rows and an un
 ## Staging deployment
 
 Clean source `022d528d7fd7` on `codex/mdx-pcm-display` deployed to `https://madrv-player-staging.madrv-player-web.workers.dev/` as version `b24974cf-5fe5-4280-93cd-8d96c571c17b`. Public Chromium checks passed for ordinary ADPCM (one row, 30 ON/OFF transitions, 24 separate history ranges) and the full PCM8/routed-MDR check. Inspected the ordinary ADPCM screenshot. Build metadata matched the source and production still served `index-B5FNQP1n.js`.
+
+## Production deployment
+
+The user requested production deployment because they could not access staging on their phone. On 2026-09-17, fast-forwarded and pushed `main` to `50d9aad`, then deployed the production configuration as Worker version `05dc4fa7-2eec-4dd1-8c39-1e6d7481cec9`. The public production page serves the verified build's `index-CVWpVxLs.js`.
+
+Both public Chromium checks passed with generated fixtures: ordinary ADPCM had one row, 30 ON/OFF transitions and 23 history ranges; PCM8/routed MDR retained eight sample identities, mute/solo, seek, stop, source replacement and all 20 layout cases. No page errors. Android hardware/BOS15.MDX confirmation remains with the user. Prior production version for rollback: `e58bb416-cd72-4ee0-8b71-a1c358a3a3b6`.
