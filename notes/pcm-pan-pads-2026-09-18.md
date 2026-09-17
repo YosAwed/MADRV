@@ -2,7 +2,7 @@
 
 Replace the PCM history UI with persistent pads grouped in one PCM bank in both matrix modes. Ordinary MDX shows one pad; PCM8 shows eight, including idle voices. Wide panels show eight columns; panels up to 650 px show four columns (two rows for PCM8). Each pad retains M/S controls; when several MDR source tracks share a hardware voice, its controls act on the group.
 
-The user confirmed left `>10`, center `>10<`, right `10<`. Numbers are decimal, zero-based including PCM8 bank offsets. A native monospace font, tabular figures, right alignment and a fixed five-character number box keep each digit position stable. Both PAN marker slots retain their width when hidden. Idle/muted pads show a dash and remain in place; active pads light up. There is no activity-history animation in this UI.
+The user confirmed left `>10`, center `>10<`, right `10<`. Numbers are decimal, zero-based including PCM8 bank offsets. At the user's follow-up request, numbers are centered in a fixed five-character box at the PAD center, using a native monospace font and tabular figures. Both PAN marker slots retain their width when hidden, so PAN changes cannot move the number. Idle/muted pads show a dash and remain in place; active pads light up. There is no activity-history animation in this UI.
 
 ## PAN telemetry
 
