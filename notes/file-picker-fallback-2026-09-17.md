@@ -15,3 +15,9 @@ No audio, MIDI, seeking, SoundFont or playlist-engine code changed. The user pre
 ## Validation
 
 The generated-fixture browser regression covers normal arrow/file/folder controls plus the fallback, while programmatic file-input click is blocked. It verifies the fallback's unrestricted single-file attributes, opening the chooser, loading MDX, adding its PDX later, and rejecting an unsupported file without replacing the current source. Existing folder, pair selection, keyboard, drop and cancellation checks remain covered. Chromium and WebKit passed; both TypeScript checks passed. Physical Xperia behavior remains unverified.
+
+## Production verification
+
+Merged and pushed source revision `7c1f24e` to main. Production build passed with the existing chunk-size warning. Deployed to `madrv-player` as version `2d11d1a4-59c1-496b-812b-4bc2bd4ced86`; previous version was `d5ef0794-8704-41a3-81ec-90729497fcb5`.
+
+Production HTML, main JS, CSS, player WASM and SoundFont worklet matched local build bytes (HTTP 200, no staging noindex header). The production regression passed all regular and fallback chooser checks, later PDX addition and unsupported-file handling with generated files only; no page errors. The fallback panel was visually inspected at mobile width. Affected Xperia 5 V behavior is still pending user testing. This release record is documentation-only after deployment.
