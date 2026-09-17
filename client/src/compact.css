@@ -361,6 +361,9 @@
 .deck-library-grid > [data-panel="playlist"] {
   container: playlist-panel / inline-size;
 }
+.deck-library-grid > [data-panel="matrix"] {
+  container: keyboard-matrix / inline-size;
+}
 @container deck-library (min-width: 740px) {
   .deck-library-grid.has-playlist {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
@@ -986,7 +989,7 @@
 .compact-deck.ui-dense .settings-toggle {
   min-height: 42px;
 }
-@container deck-library (max-width: 1000px) {
+@container keyboard-matrix (max-width: 1000px) {
   .compact-deck.ui-dense .matrix-engine-row {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
