@@ -7,3 +7,5 @@ Held-note decay changes from 1,800 ms to 900 ms (same ease-out curve). Its final
 Validation: normal TypeScript check and Cloudflare build passed. The existing decay browser check now verifies the darker final color and that it is reached by the one-second observation. Generated fixtures only; no user music files used.
 
 Chrome + WebKit decay checks passed for ordinary PCM and PCM8, including same-note retrigger, 300 ms release, and immediate stop. Chrome PAD regression passed for ordinary/PCM8/routed MDR, PAN, fixed digits, five-digit non-overlap across 20 layout combinations, mute/solo/seek, zero browser errors. Mobile screenshot visually inspected for bold PAN strokes.
+
+Staging deployment: source `02fd80c225c8` (clean), Worker version `8d8ebe3a-c0f7-41b6-9e7b-3327f064df0a`. Public HTML, build-info, JS and CSS matched the staging build byte for byte. Production is unchanged.
