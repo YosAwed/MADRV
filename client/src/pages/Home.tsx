@@ -573,6 +573,12 @@ export default function Home() {
     setNotice("再生を停止しました。");
   }
 
+  function selectStandaloneSource() {
+    // Loading a file or URL leaves playlist playback, while keeping its entries.
+    stopPlayback();
+    setPlaylistIndex(null);
+  }
+
   async function seekPlayback(seconds: number) {
     // Serialize renderer rebuilds and retain the latest destination while one
     // is pending. The source generation also cancels queued requests on STOP.
@@ -1011,8 +1017,6 @@ export default function Home() {
   }
 
   async function loadLocalFiles(files: File[]) {
-    if (playbackLoading) stopPlayback();
-    await maybeRevertSessionSoundFontBeforeSourceLoad();
     const mdrFile = files.find((file) => file.name.toLowerCase().endsWith(".mdr"));
     const mdxFile = files.find((file) => file.name.toLowerCase().endsWith(".mdx"));
     const pdxFiles = files.filter((file) => file.name.toLowerCase().endsWith(".pdx"));
@@ -1021,13 +1025,18 @@ export default function Home() {
       setNotice("MDR、MDX、またはPDXファイルを選択してください。");
       return;
     }
+    selectStandaloneSource();
+    const requestId = playlistStartRequestRef.current;
     setMode("local");
     setMmlError(null);
     try {
+      await maybeRevertSessionSoundFontBeforeSourceLoad();
+      if (requestId !== playlistStartRequestRef.current) return;
       const incomingPdx = await Promise.all(pdxFiles.map(async (file) => ({ name: file.name, data: await file.arrayBuffer() })));
       const mergedPdx = [...localPdxCandidates.filter((candidate) => !incomingPdx.some((incoming) => fileStem(incoming.name) === fileStem(candidate.name))), ...incomingPdx];
-      if (incomingPdx.length) setLocalPdxCandidates(mergedPdx);
       const sourceBuffer = sourceFile ? await sourceFile.arrayBuffer() : localMdr;
+      if (requestId !== playlistStartRequestRef.current) return;
+      if (incomingPdx.length) setLocalPdxCandidates(mergedPdx);
       const pdxCandidate = incomingPdx[0] ?? (localPdxFileName ? { name: localPdxFileName, data: localPdx } : undefined);
       if (mdrFile) {
         const info = inspectMdr(sourceBuffer!);
@@ -1086,6 +1095,7 @@ export default function Home() {
         }
       }
     } catch (error) {
+      if (requestId !== playlistStartRequestRef.current) return;
       setNotice(error instanceof Error ? error.message : "MDR／PDXの読込に失敗しました。");
     }
   }
@@ -1380,6 +1390,7 @@ export default function Home() {
 
   async function loadRemoteEntry(mdrUrl: string, pdxUrl?: string, label?: string, playbackRequestId?: number): Promise<{ source: ArrayBuffer; pdx?: ArrayBuffer; format: "mdr" | "mdx"; title: string } | undefined> {
     const ownsTransition = playbackRequestId === undefined;
+    if (ownsTransition) selectStandaloneSource();
     const requestId = playbackRequestId ?? beginSourceTransition(label?.trim() || playlistTitleFromUrl(mdrUrl));
     const isCurrent = () => requestId === playlistStartRequestRef.current;
     const controller = new AbortController();
