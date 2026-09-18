@@ -43,7 +43,11 @@ try {
       assert.ok(on.length>20);
       assert.notEqual(on[0].color,on.at(-1).color,'held notes decay');
       assert.ok(on[0].animationTime<160,'new note restarts its brightness');
-      assert.ok(on.at(-1).animationTime>=1700,'held note is not continually retriggered');
+      assert.ok(on.at(-1).animationTime>=850,'held note is not continually retriggered');
+      assert.equal(on.at(-1).color,'rgb(53, 69, 31)','held PAD settles to the darker background');
+      const settledOn=on.find(f=>f.t>=on[0].t+1000);
+      assert.ok(settledOn,'held decay settles by the one-second observation');
+      assert.equal(settledOn.color,'rgb(53, 69, 31)');
     }
     const next=frames.findIndex(f=>f.active&&f.trigger===hits[1]);
     assert.equal(frames[next-1].active,true,'retrigger is detected without a sampled note-off');

@@ -58,8 +58,8 @@ const PcmPadSurface = memo(function PcmPadSurface({ active, enabled, trigger, so
     if (active) {
       animation.current = pad.animate([
         { backgroundColor: "#d8ff3e", color: "#11120f", borderColor: "#d8ff3e" },
-        { backgroundColor: "#667634", color: "#f5f4ec", borderColor: "#879b43" },
-      ], { duration: 1800, easing: "ease-out", fill: "forwards" });
+        { backgroundColor: "#35451f", color: "#d2dcc5", borderColor: "#536735" },
+      ], { duration: 900, easing: "ease-out", fill: "forwards" });
     } else if (hadAnimation) {
       animation.current = pad.animate([previous,
         { backgroundColor: "#181c15", color: "#7f8873", borderColor: "#ffffff30" },
@@ -96,7 +96,7 @@ const PcmPadReadout = memo(function PcmPadReadout({ label, active, number, pan, 
 
 /** Fixed-height vector marks fit the available side space without moving the digits. */
 function PcmPanMark({ side, visible, emphasized }: { side: "left" | "right"; visible: boolean; emphasized: boolean }) {
-  return <svg className={`pcm-pad-pan pcm-pad-pan-${side}`} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+  return <svg className={`pcm-pad-pan pcm-pad-pan-${side}`} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"
     style={{ visibility: visible ? "visible" : "hidden" }} data-emphasized={emphasized} aria-hidden="true">
     <g transform={side === "right" ? "translate(20 20) rotate(180)" : undefined}>
       <path d="M2 2 Q10 10 2 18 M7 5 Q12 10 7 15" style={{ visibility: visible && emphasized ? "visible" : "hidden" }} />
