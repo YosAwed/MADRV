@@ -1475,6 +1475,36 @@ export default function Home() {
     await loadRemoteEntry(remoteMdr, remotePdx);
   }
 
+  function importCatalogEntries(entries: RemoteCatalogEntry[]) {
+    setCatalogEntries(entries);
+    const playlistItems: PlaylistEntry[] = entries.map((entry) => ({ id: `remote:${entry.id}`, title: entry.title, format: entry.mdrUrl.toLowerCase().includes(".mdx") ? "mdx" : "mdr", remoteMdrUrl: entry.mdrUrl, remotePdxUrl: entry.pdxUrl, origin: "remote", path: entry.mdrUrl, loopCount: DEFAULT_PLAYLIST_LOOP_COUNT }));
+    setPlaylistEntries((current) => {
+      const ids = new Set(current.map((entry) => entry.id));
+      return [...current, ...playlistItems.filter((entry) => !ids.has(entry.id))];
+    });
+    setPlaylistIndex((current) => current ?? (playlistItems.length ? 0 : null));
+    playlistRunRef.current = false;
+    cancelSourceTransition();
+    setCatalogQuery("");
+  }
+
+  async function loadLocalCatalog(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    setCatalogLoading(true);
+    try {
+      const text = (await file.text()).replace(/^\uFEFF/, "");
+      const entries = parseRemoteCatalogPayload(JSON.parse(text));
+      importCatalogEntries(entries);
+      setNotice(`「${file.name}」から${entries.length}曲を読み込みました。登録済みの曲は重複追加しません。`);
+    } catch (error) {
+      setNotice(error instanceof SyntaxError ? "JSONの形式が正しくありません。Google Drive共有カタログと同じ形式のJSONを選択してください。" : error instanceof Error ? error.message : "カタログJSONを読み込めませんでした。");
+    } finally {
+      setCatalogLoading(false);
+    }
+  }
+
   async function loadCatalog() {
     if (!catalogUrl.trim()) {
       setNotice("先にCORS対応のカタログJSON URLを入力してください。");
@@ -1486,17 +1516,8 @@ export default function Home() {
       const entries = isCloudShareLink(trimmedCatalogUrl)
         ? parseRemoteCatalogPayload(JSON.parse(new TextDecoder().decode(base64ToArrayBuffer((await publicStorage.mutateAsync({ url: trimmedCatalogUrl, kind: "catalog" })).dataBase64))))
         : await fetchRemoteCatalog(trimmedCatalogUrl);
-      setCatalogEntries(entries);
-      const playlistItems: PlaylistEntry[] = entries.map((entry) => ({ id: `remote:${entry.id}`, title: entry.title, format: entry.mdrUrl.toLowerCase().includes(".mdx") ? "mdx" : "mdr", remoteMdrUrl: entry.mdrUrl, remotePdxUrl: entry.pdxUrl, origin: "remote", path: entry.mdrUrl, loopCount: DEFAULT_PLAYLIST_LOOP_COUNT }));
-      setPlaylistEntries((current) => {
-        const ids = new Set(current.map((entry) => entry.id));
-        return [...current, ...playlistItems.filter((entry) => !ids.has(entry.id))];
-      });
-      setPlaylistIndex((current) => current ?? (playlistItems.length ? 0 : null));
-      playlistRunRef.current = false;
-      cancelSourceTransition();
-      setCatalogQuery("");
-      setNotice(`リモートフォルダ／JSONから${entries.length}曲をプレイリストへ追加しました。各曲は初期設定で${DEFAULT_PLAYLIST_LOOP_COUNT}回ループします。`);
+      importCatalogEntries(entries);
+      setNotice(`リモートJSONから${entries.length}曲を読み込みました。登録済みの曲は重複追加しません。`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "リモートカタログを取得できませんでした。");
     } finally {
@@ -2134,6 +2155,11 @@ export default function Home() {
       />
     </label>
     <button onClick={loadCatalog} disabled={catalogLoading} className="mono w-full min-w-0 border border-white/25 px-3 py-2 text-[9px] uppercase tracking-[0.08em] text-[#dfe1d8] transition-colors hover:border-primary hover:text-primary disabled:opacity-35">Load catalog</button>
+    <label className="block min-w-0">
+      <span className="text-xs text-[#dfe1d8]">ローカルのカタログJSONを開く</span>
+      <input type="file" accept=".json,application/json" aria-label="ローカルのカタログJSONを開く" disabled={catalogLoading} onChange={loadLocalCatalog} className="mono mt-1 block w-full min-w-0 text-[10px] text-[#dfe1d8] file:mr-2 file:border file:border-white/25 file:bg-[#11120f] file:px-3 file:py-2 file:text-[#dfe1d8] disabled:opacity-35" />
+      <span className="mt-1 block text-[10px] text-[#a9aca2]">Google Drive共有JSONと同じ形式。曲・PDXはJSON内のURLから取得します。</span>
+    </label>
   </div>
 {(catalogEntries.length > 0 || favoriteEntries.length > 0) && <div className="mt-3">
                         <input value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="タイトル、作者、タグを検索" className="mono w-full border border-white/10 bg-[#11120f] px-3 py-2 text-[10px] text-[#f5f4ec] outline-none placeholder:text-[#62675d] focus:border-primary" />
