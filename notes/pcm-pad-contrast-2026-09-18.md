@@ -13,3 +13,9 @@ Development branch: `codex/pcm-pad-contrast`. Production remains unchanged pendi
 ## Staging deployment
 
 Clean source `8986a05f4555` deployed to `https://madrv-player-staging.madrv-player-web.workers.dev/` as Worker version `68258731-d05c-4018-a4f6-7163e4f2790e`. The public Chromium check passed including the measured fade, retained numbers, PCM8/routed MDR, 20 layout cases and playback controls. Build metadata matched. Production still serves `index-BM8V5aD5.js`.
+
+## Production release
+
+On 2026-09-18, the user requested production release. Fast-forwarded and pushed `main` from `04e3e64` to `c635eeb`, then deployed `madrv-player` as Worker version `a3a583ff-20ca-4043-ad50-55e76b093ee3`. Build passed with the existing chunk-size warning. Public HTML, `index-mzp9M5Pv.js` and `index-DNjo0Kna.css` matched the local release files byte-for-byte.
+
+The public Chromium check passed: ordinary PCM/PCM8/routed MDR, PAN, centered positions, measured release fade and retained number, all 20 layouts, mute/solo and seek, without page errors. Previous production version for rollback: `322f427c-d201-4ecb-b156-34023f8c7b6d`.
