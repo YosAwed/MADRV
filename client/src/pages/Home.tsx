@@ -363,6 +363,7 @@ export default function Home() {
   const [localPdxAutoMatched, setLocalPdxAutoMatched] = useState(false);
   const [mixOutputPeak, setMixOutputPeak] = useState(0);
   const [pcmActivityMask, setPcmActivityMask] = useState(0);
+  const [pcmTriggers, setPcmTriggers] = useState<readonly number[]>([]);
   const [pcmSamples, setPcmSamples] = useState<readonly (number | null)[]>([]);
   const [pcmPans, setPcmPans] = useState<readonly (number | null)[]>([]);
   const [remoteSource, setRemoteSource] = useState<{ source: ArrayBuffer; pdx?: ArrayBuffer; format: "mdr" | "mdx"; title: string } | null>(null);
@@ -819,6 +820,7 @@ export default function Home() {
     player.setOutputPeakListener(setMixOutputPeak);
     player.setPcmActivityListener(setPcmActivityMask);
     player.setPcmSampleListener(setPcmSamples);
+    player.setPcmTriggerListener(setPcmTriggers);
     player.setPcmPanListener(setPcmPans);
     player.setMdrTrackKeyListener(setTrackKeyState);
     player.setTimerBListener(setTimerB);
@@ -829,6 +831,7 @@ export default function Home() {
       player.setOutputPeakListener(undefined);
       player.setPcmActivityListener(undefined);
       player.setPcmSampleListener(undefined);
+      player.setPcmTriggerListener(undefined);
       player.setPcmPanListener(undefined);
       player.setMdrTrackKeyListener(undefined);
       player.setTimerBListener(undefined);
@@ -2014,7 +2017,7 @@ export default function Home() {
                   {ENGINE_BUS_ORDER.map((engine) => {
                     const busTracks = mixerTracksByEngine[engine];
                     if (!busTracks.length || (keyboardEngineFilter !== "all" && keyboardEngineFilter !== engine)) return null;
-                    if (engine === "pcm") return <PcmPadBank key={engine} tracks={busTracks} mask={pcmActivityMask} samples={pcmSamples} pans={pcmPans} running={isPlaying && !playbackLoading} source={mode === "remote" ? remoteSource?.source : localMdr} mutedTracks={mutedTracks} soloTrack={soloTrack} onMute={togglePcmPadMute} onSolo={togglePcmPadSolo} />;
+                    if (engine === "pcm") return <PcmPadBank key={engine} tracks={busTracks} mask={pcmActivityMask} samples={pcmSamples} pans={pcmPans} triggers={pcmTriggers} running={isPlaying && !playbackLoading} source={mode === "remote" ? remoteSource?.source : localMdr} mutedTracks={mutedTracks} soloTrack={soloTrack} onMute={togglePcmPadMute} onSolo={togglePcmPadSolo} />;
                     const notes = mergeEngineBusNotes(busTracks, trackKeyState, mutedTracks, engine);
                     const meta = ENGINE_BUS_META[engine];
                     const lit = notes.map((note) => formatMidiNoteName(note)).join(" ");
@@ -2034,7 +2037,7 @@ export default function Home() {
                   {visibleMixerTracks.map((track) => {
                     if (track.engine === "pcm") {
                       if (track !== mixerTracksByEngine.pcm[0]) return null;
-                      return <PcmPadBank key="pcm" tracks={mixerTracksByEngine.pcm} mask={pcmActivityMask} samples={pcmSamples} pans={pcmPans} running={isPlaying && !playbackLoading} source={mode === "remote" ? remoteSource?.source : localMdr} mutedTracks={mutedTracks} soloTrack={soloTrack} onMute={togglePcmPadMute} onSolo={togglePcmPadSolo} />;
+                      return <PcmPadBank key="pcm" tracks={mixerTracksByEngine.pcm} mask={pcmActivityMask} samples={pcmSamples} pans={pcmPans} triggers={pcmTriggers} running={isPlaying && !playbackLoading} source={mode === "remote" ? remoteSource?.source : localMdr} mutedTracks={mutedTracks} soloTrack={soloTrack} onMute={togglePcmPadMute} onSolo={togglePcmPadSolo} />;
                     }
                     const muted = mutedTracks.includes(track.index);
                     const solo = soloTrack === track.index;

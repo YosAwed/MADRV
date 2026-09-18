@@ -1096,8 +1096,8 @@ const CONVERTER_MODULE_URL = "/manus-storage/madrv-converter-v4_28935c58.mjs";
 const CONVERTER_WASM_URL = "/manus-storage/madrv-converter-v4_f7f66741.wasm";
 const PLAYER_MODULE_URL = "/manus-storage/madrv-mdx-player-v12_fde3ce0c.mjs";
 // v13 keeps the v12 ABI and discards masked PCM key-ons when unmuting.
-// MDR and MDX playback share this core.
-const PLAYER_WASM_URL = "/manus-storage/madrv-mdx-player-v15_6c603674.wasm";
+// v16 adds readonly PCM key-on counters for the PAD decay; MDR and MDX share this core.
+const PLAYER_WASM_URL = "/manus-storage/madrv-mdx-player-v16_865de60b.wasm";
 const MIDI_EVENTS_MODULE_URL = "/manus-storage/madrv-midi-events-v4_b2d6bf6b.mjs";
 const MIDI_EVENTS_WASM_URL = "/manus-storage/madrv-midi-events-v4_2facde2d.wasm";
 const SPESSA_PROCESSOR_URL = "/manus-storage/madrv-spessasynth-processor.js";
@@ -1755,6 +1755,11 @@ class MadrvWasmPlayer {
     });
   }
 
+  getPcmTriggerCounts(): number[] {
+    const getCount = (this.player?.asm as Record<string, unknown> | undefined)?.get_pcm_trigger_count;
+    return Array.from({ length: 8 }, (_, voice) => this.active && typeof getCount === "function" ? getCount(voice) >>> 0 : 0);
+  }
+
   getPcmPans(mask: number): (number | null)[] {
     const getPan = (this.player?.asm as Record<string, unknown> | undefined)?.get_pcm_pan;
     return Array.from({ length: 8 }, (_, voice) => {
@@ -1929,14 +1934,14 @@ export class SignalDeckAudio {
    * their key states on the rendered audio timeline instead of sampling only
    * the final state at the end of the block.
    */
-  private mdrHardwareVisualQueue = new OrderedMidiQueue<{ snapshot?: MdrTrackKeyState; pcm?: { mask: number; samples: (number | null)[]; pans: (number | null)[]; generation: number }; generation: number }>({
+  private mdrHardwareVisualQueue = new OrderedMidiQueue<{ snapshot?: MdrTrackKeyState; pcm?: { mask: number; samples: (number | null)[]; pans: (number | null)[]; triggers: number[]; generation: number }; generation: number }>({
     now: () => this.graph.context.currentTime,
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: timer => window.clearTimeout(timer),
     dispatch: ({ snapshot, pcm, generation }) => {
       if (generation !== this.playbackGeneration) return;
       if (snapshot) this.applyHardwareTrackKeys(snapshot);
-      if (pcm && pcm.generation === this.pcmVisualGeneration) this.reportPcmActivity(pcm.mask, pcm.samples, pcm.pans);
+      if (pcm && pcm.generation === this.pcmVisualGeneration) this.reportPcmActivity(pcm.mask, pcm.samples, pcm.pans, pcm.triggers);
     },
   });
   /** Latest planned or actually submitted MIDI timestamp, including late dispatch. */
@@ -1958,6 +1963,8 @@ export class SignalDeckAudio {
   private pcmActivityListener?: (mask: number) => void;
   private pcmSampleListener?: (samples: readonly (number | null)[]) => void;
   private reportedPcmSamples: (number | null)[] = [];
+  private pcmTriggerListener?: (triggers: readonly number[]) => void;
+  private reportedPcmTriggers: number[] = [];
   private pcmVisualGeneration = 0;
   private pcmPanListener?: (pans: readonly (number | null)[]) => void;
   private reportedPcmPans: (number | null)[] = [];
@@ -2264,6 +2271,11 @@ export class SignalDeckAudio {
     listener?.(this.reportedPcmSamples);
   }
 
+  setPcmTriggerListener(listener: ((triggers: readonly number[]) => void) | undefined) {
+    this.pcmTriggerListener = listener;
+    listener?.(this.reportedPcmTriggers);
+  }
+
   setPcmPanListener(listener: ((pans: readonly (number | null)[]) => void) | undefined) {
     this.pcmPanListener = listener;
     listener?.(this.reportedPcmPans);
@@ -2292,14 +2304,23 @@ export class SignalDeckAudio {
   private resetPcmActivity() {
     this.pcmVisualGeneration += 1;
     this.pcmActivityListener?.(0);
+    this.reportedPcmTriggers = [];
+    this.pcmTriggerListener?.([]);
     this.reportedPcmSamples = [];
     this.pcmSampleListener?.([]);
     this.reportedPcmPans = [];
     this.pcmPanListener?.([]);
   }
 
-  private reportPcmActivity(mask: number, capturedSamples?: (number | null)[], capturedPans?: (number | null)[]) {
+  private reportPcmActivity(mask: number, capturedSamples?: (number | null)[], capturedPans?: (number | null)[], capturedTriggers?: number[]) {
     this.pcmActivityListener?.(mask & 0xff);
+    if (this.pcmTriggerListener) {
+      const triggers = capturedTriggers ?? this.mdrPlayer?.getPcmTriggerCounts() ?? [];
+      if (triggers.length !== this.reportedPcmTriggers.length || triggers.some((count, voice) => count !== this.reportedPcmTriggers[voice])) {
+        this.reportedPcmTriggers = triggers;
+        this.pcmTriggerListener(triggers);
+      }
+    }
     if (this.pcmSampleListener) {
       const samples = capturedSamples ?? this.mdrPlayer?.getPcmSampleNumbers(mask) ?? [];
       if (samples.length !== this.reportedPcmSamples.length || samples.some((sample, voice) => sample !== this.reportedPcmSamples[voice])) {
@@ -2405,10 +2426,10 @@ export class SignalDeckAudio {
   private queueHardwareVisuals(targetAt: number) {
     if (!this.mdrPlayer) return;
     const snapshot = this.mdrTrackKeyListener && this.mdrHardwareTrackIndexes.length ? this.readHardwareTrackKeys() : undefined;
-    let pcm: { mask: number; samples: (number | null)[]; pans: (number | null)[]; generation: number } | undefined;
-    if (this.pcmActivityListener || this.pcmSampleListener || this.pcmPanListener) {
+    let pcm: { mask: number; samples: (number | null)[]; pans: (number | null)[]; triggers: number[]; generation: number } | undefined;
+    if (this.pcmActivityListener || this.pcmSampleListener || this.pcmPanListener || this.pcmTriggerListener) {
       const mask = this.mdrPlayer.getPcmActiveMask();
-      pcm = { mask, samples: this.pcmSampleListener ? this.mdrPlayer.getPcmSampleNumbers(mask) : [], pans: this.pcmPanListener ? this.mdrPlayer.getPcmPans(mask) : [], generation: this.pcmVisualGeneration };
+      pcm = { mask, samples: this.pcmSampleListener ? this.mdrPlayer.getPcmSampleNumbers(mask) : [], pans: this.pcmPanListener ? this.mdrPlayer.getPcmPans(mask) : [], triggers: this.pcmTriggerListener ? this.mdrPlayer.getPcmTriggerCounts() : [], generation: this.pcmVisualGeneration };
     }
     if (snapshot || pcm) this.mdrHardwareVisualQueue.enqueue({ snapshot, pcm, generation: this.playbackGeneration }, targetAt);
   }
@@ -2422,7 +2443,7 @@ export class SignalDeckAudio {
       return 0;
     }
     const sampleRate = resolvePlaybackSampleRate(this.graph.context.sampleRate);
-    const hasVisuals = this.mdrTrackKeyListener || this.pcmActivityListener || this.pcmSampleListener || this.pcmPanListener;
+    const hasVisuals = this.mdrTrackKeyListener || this.pcmActivityListener || this.pcmSampleListener || this.pcmPanListener || this.pcmTriggerListener;
     const sliceFrames = hasVisuals ? 2048 : left.length;
     let peak = 0;
     for (let offset = 0; offset < left.length; offset += sliceFrames) {

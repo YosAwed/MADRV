@@ -1,11 +1,12 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isPcmVoiceActive, type MdrMixerTrack } from "@/lib/madrvEngine";
 
-export const PcmPadBank = memo(function PcmPadBank({ tracks, mask, samples, pans, running, source, mutedTracks, soloTrack, onMute, onSolo }: {
+export const PcmPadBank = memo(function PcmPadBank({ tracks, mask, samples, pans, triggers, running, source, mutedTracks, soloTrack, onMute, onSolo }: {
   tracks: readonly MdrMixerTrack[];
   mask: number;
   samples: readonly (number | null)[];
   pans: readonly (number | null)[];
+  triggers: readonly number[];
   running: boolean;
   source?: ArrayBuffer | null;
   mutedTracks: readonly number[];
@@ -25,21 +26,51 @@ export const PcmPadBank = memo(function PcmPadBank({ tracks, mask, samples, pans
         const number = active ? samples[voice] ?? null : null;
         const pan = active ? pans[voice] ?? null : null;
         const label = `PCM ${voice + 1}`;
-        return <div key={voice} className={`pcm-pad${active ? " is-active" : ""}${muted ? " is-muted" : ""}${!running ? " is-stopped" : ""}`}
-          data-testid={`pcm-pad-${voice + 1}`} data-active={active} data-sample-number={number ?? undefined} data-pan={pan ?? undefined}>
+        return <PcmPadSurface key={voice} active={active} enabled={running && !muted} trigger={triggers[voice] ?? 0} source={source} className={`pcm-pad${active ? " is-active" : ""}${muted ? " is-muted" : ""}${!running ? " is-stopped" : ""}`}
+          data-testid={`pcm-pad-${voice + 1}`} data-active={active} data-trigger={triggers[voice] ?? 0} data-sample-number={number ?? undefined} data-pan={pan ?? undefined}>
           <span className="mono pcm-pad-channel" aria-hidden="true">{voice + 1}</span>
           <PcmPadReadout label={label} active={active} number={number} pan={pan} enabled={running && !muted} muted={muted} source={source} />
           <div className="pcm-pad-controls">
             <button type="button" disabled={!voiceTracks.length} aria-label={`${label}のミュートを${muted ? "オフ" : "オン"}にする`} aria-pressed={muted} onClick={() => onMute(voiceTracks)}>M</button>
             <button type="button" disabled={!voiceTracks.length} aria-label={`${label}を${solo ? "ソロ解除" : "ソロ"}にする`} aria-pressed={solo} onClick={() => onSolo(voiceTracks)}>S</button>
           </div>
-        </div>;
+        </PcmPadSurface>;
       })}
     </div>
   </div>;
 });
 
-/** Retain only the last displayed hit; CSS handles the fade without JS timers. */
+/** Browser animations avoid per-frame React updates and restart even for repeated samples. */
+const PcmPadSurface = memo(function PcmPadSurface({ active, enabled, trigger, source, ...props }: React.ComponentProps<"div"> & {
+  active: boolean; enabled: boolean; trigger: number; source?: ArrayBuffer | null;
+}) {
+  const element = useRef<HTMLDivElement>(null);
+  const animation = useRef<Animation | null>(null);
+  useLayoutEffect(() => {
+    const pad = element.current;
+    if (!pad) return;
+    const style = getComputedStyle(pad);
+    const previous = { backgroundColor: style.backgroundColor, color: style.color, borderColor: style.borderColor };
+    const hadAnimation = animation.current !== null;
+    animation.current?.cancel();
+    animation.current = null;
+    if (!enabled) return;
+    if (active) {
+      animation.current = pad.animate([
+        { backgroundColor: "#d8ff3e", color: "#11120f", borderColor: "#d8ff3e" },
+        { backgroundColor: "#667634", color: "#f5f4ec", borderColor: "#879b43" },
+      ], { duration: 1800, easing: "ease-out", fill: "forwards" });
+    } else if (hadAnimation) {
+      animation.current = pad.animate([previous,
+        { backgroundColor: "#181c15", color: "#7f8873", borderColor: "#ffffff30" },
+      ], { duration: 300, easing: "ease-out", fill: "forwards" });
+    }
+  }, [active, enabled, trigger, source]);
+  useEffect(() => () => animation.current?.cancel(), []);
+  return <div {...props} ref={element} />;
+});
+
+/** Retain only the last displayed hit; the browser handles the fade without JS timers. */
 const PcmPadReadout = memo(function PcmPadReadout({ label, active, number, pan, enabled, muted, source }: {
   label: string; active: boolean; number: number | null; pan: number | null;
   enabled: boolean; muted: boolean; source?: ArrayBuffer | null;
