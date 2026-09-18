@@ -1107,9 +1107,11 @@
 .pcm-pad.is-active { color: #11120f; border-color: #d8ff3e; background: #d8ff3e; transition: none; }
 .pcm-pad.is-muted { opacity: .55; }
 .pcm-pad-channel { display: block; height: 16px; padding-left: 4px; font-size: 10px; line-height: 16px; color: inherit; }
-.pcm-pad-readout { display: grid; grid-template-columns: 1ch 5ch 1ch; justify-content: center; font-family: monospace; font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 700; line-height: 28px; height: 28px; letter-spacing: 0; white-space: pre; }
-.pcm-pad-number { text-align: center; }
-.pcm-pad-pan { text-align: center; }
+.pcm-pad-readout { position: relative; display: flex; justify-content: center; font-family: monospace; font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 700; line-height: 28px; height: 28px; letter-spacing: 0; white-space: pre; }
+.pcm-pad-number { flex: 0 0 5ch; text-align: center; }
+.pcm-pad-pan { position: absolute; top: 4px; height: 20px; width: clamp(6px, calc((100% - var(--pcm-number-width, 1ch)) / 2 - 4px), 20px); }
+.pcm-pad-pan-left { left: 2px; }
+.pcm-pad-pan-right { right: 2px; }
 .pcm-pad-controls { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid #ffffff20; background: #181c15; }
 .pcm-pad-controls button { min-width: 0; min-height: 30px; font: 11px monospace; color: #bbc1b2; }
 .pcm-pad-controls button + button { border-left: 1px solid #ffffff20; }

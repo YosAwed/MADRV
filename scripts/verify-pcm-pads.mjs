@@ -40,6 +40,15 @@ try{
   await page.waitForFunction(count=>Array.from({length:count},(_,v)=>{
    const pad=document.querySelector(`[data-testid="pcm-pad-${v+1}"]`);return pad?.getAttribute('data-sample-number')===String(v*96+1)&&pad?.getAttribute('data-pan')===String(v%3+1);
   }).every(Boolean),expected);
+  const panMarks = await page.locator('.pcm-pad').evaluateAll(pads => pads.map(pad => ({
+   pan: Number(pad.dataset.pan), active: pad.dataset.active === 'true',
+   left: pad.querySelector('.pcm-pad-pan-left')?.getAttribute('data-emphasized'),
+   right: pad.querySelector('.pcm-pad-pan-right')?.getAttribute('data-emphasized'),
+  })));
+  for (const mark of panMarks.filter(mark => mark.active)) {
+   assert.equal(mark.left, String(mark.pan === 1 || mark.pan === 3));
+   assert.equal(mark.right, String(mark.pan === 2 || mark.pan === 3));
+  }
   if(format==='adpcm'){
    await page.waitForFunction(()=>document.querySelector('[data-testid="pcm-pad-1"]').getAttribute('data-active')==='false');
    const fade=await first.evaluate(async pad=>{
@@ -86,10 +95,18 @@ try{
       if((await settings.getAttribute('aria-expanded')==='true')!==open)await settings.click();
       const sizes=await bank.evaluate(bank=>[...bank.querySelectorAll('.pcm-pad')].map(p=>{
        const b=bank.getBoundingClientRect(),r=p.getBoundingClientRect(),t=p.querySelector('.pcm-pad-readout').getBoundingClientRect();
-       return {left:r.left,right:r.right,bankLeft:b.left,bankRight:b.right,width:r.width,textWidth:t.width,overflow:p.scrollWidth>p.clientWidth};
+       const readout=p.querySelector('.pcm-pad-readout'),number=p.querySelector('.pcm-pad-number');
+       const oldNumber=number.textContent,oldWidth=readout.style.getPropertyValue('--pcm-number-width');
+       // Worst supported sample index must fit alongside both wave marks too.
+       number.textContent='25503';readout.style.setProperty('--pcm-number-width','5ch');
+       const range=document.createRange();range.selectNodeContents(number);const digits=range.getBoundingClientRect();
+       const left=p.querySelector('.pcm-pad-pan-left').getBoundingClientRect(),right=p.querySelector('.pcm-pad-pan-right').getBoundingClientRect();
+       const panFits=left.left>=r.left&&left.right<=digits.left&&right.left>=digits.right&&right.right<=r.right;
+       number.textContent=oldNumber;readout.style.setProperty('--pcm-number-width',oldWidth);
+       return {left:r.left,right:r.right,bankLeft:b.left,bankRight:b.right,width:r.width,textWidth:t.width,overflow:p.scrollWidth>p.clientWidth,panFits};
       }));
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
-      for(const m of sizes){assert.ok(m.left>=m.bankLeft&&m.right<=m.bankRight);assert.ok(!m.overflow,JSON.stringify({width,playlist,open,m}));}
+      for(const m of sizes){assert.ok(m.left>=m.bankLeft&&m.right<=m.bankRight);assert.ok(!m.overflow,JSON.stringify({width,playlist,open,m}));assert.ok(m.panFits,JSON.stringify({width,playlist,open,m}));}
      }
     }
    }

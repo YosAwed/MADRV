@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { isPcmVoiceActive, type MdrMixerTrack } from "@/lib/madrvEngine";
 
 export const PcmPadBank = memo(function PcmPadBank({ tracks, mask, samples, pans, triggers, running, source, mutedTracks, soloTrack, onMute, onSolo }: {
@@ -84,10 +84,23 @@ const PcmPadReadout = memo(function PcmPadReadout({ label, active, number, pan, 
   const shownNumber = active ? number : previous?.number ?? null;
   const shownPan = active ? pan : previous?.pan ?? null;
   const panLabel = shownPan === 1 ? "左" : shownPan === 2 ? "右" : shownPan === 3 ? "中央" : shownPan === 0 ? "出力なし" : "PAN不明";
-  return <div className="pcm-pad-readout" role="img" aria-label={`${label}、${muted ? "ミュート中" : shownNumber !== null ? `${active ? "" : "前回の"}サンプル${shownNumber}、${panLabel}` : "待機中"}`}
-    title="サンプル番号は0始まり。左 >番号 ／中央 >番号< ／右 番号<。消灯中は前回の発音。">
-    <span className="pcm-pad-pan" style={{ visibility: shownPan === 1 || shownPan === 3 ? "visible" : "hidden" }} aria-hidden="true">&gt;</span>
+  const hasPan = shownPan !== null && shownPan !== 0;
+  const numberWidth = `${shownNumber === null ? 1 : String(shownNumber).length}ch`;
+  return <div className="pcm-pad-readout" style={{ "--pcm-number-width": numberWidth } as CSSProperties} role="img" aria-label={`${label}、${muted ? "ミュート中" : shownNumber !== null ? `${active ? "" : "前回の"}サンプル${shownNumber}、${panLabel}` : "待機中"}`}
+    title="サンプル番号は0始まり。左 ))>番号< ／中央 ))>番号<(( ／右 >番号<((。消灯中は前回の発音。">
+    <PcmPanMark side="left" visible={hasPan} emphasized={shownPan === 1 || shownPan === 3} />
     <span className="pcm-pad-number" aria-hidden="true">{shownNumber === null ? "—" : String(shownNumber)}</span>
-    <span className="pcm-pad-pan" style={{ visibility: shownPan === 2 || shownPan === 3 ? "visible" : "hidden" }} aria-hidden="true">&lt;</span>
+    <PcmPanMark side="right" visible={hasPan} emphasized={shownPan === 2 || shownPan === 3} />
   </div>;
 });
+
+/** Fixed-height vector marks fit the available side space without moving the digits. */
+function PcmPanMark({ side, visible, emphasized }: { side: "left" | "right"; visible: boolean; emphasized: boolean }) {
+  return <svg className={`pcm-pad-pan pcm-pad-pan-${side}`} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+    style={{ visibility: visible ? "visible" : "hidden" }} data-emphasized={emphasized} aria-hidden="true">
+    <g transform={side === "right" ? "translate(20 20) rotate(180)" : undefined}>
+      <path d="M2 2 Q10 10 2 18 M7 5 Q12 10 7 15" style={{ visibility: visible && emphasized ? "visible" : "hidden" }} />
+      <path d="M13 6 L18 10 L13 14" />
+    </g>
+  </svg>;
+}
