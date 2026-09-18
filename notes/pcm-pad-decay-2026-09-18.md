@@ -16,3 +16,6 @@ Validation:
 - 223 tests / 19 files; normal and Cloudflare TypeScript checks; Cloudflare build passed (existing chunk-size warning).
 
 Generated fixtures only. No actual phone performance measurement. Production is not changed by this branch.
+
+Staging deployment: source `e37d941be068` (clean), Worker `madrv-player-staging`, version `5150e502-2193-4c54-8f08-6818956b2f3e`. Public `build-info.json` confirms the branch/revision. Main and the production Worker remain unchanged.
+The generated-fixture decay/retrigger/release/stop browser check also passed on the deployed staging URL for ordinary PCM and PCM8.
